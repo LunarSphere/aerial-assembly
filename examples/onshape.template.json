@@ -1,0 +1,13 @@
+{
+  "base_url": "https://cad.onshape.com",
+  "api_version": "v16",
+  "document_id": "REPLACE_WITH_DOCUMENT_ID",
+  "workspace_id": "REPLACE_WITH_EXPERIMENT_WORKSPACE_ID",
+  "variable_studio_id": "REPLACE_WITH_MASTER_VARIABLES_ELEMENT_ID",
+  "experiment_workspace": true,
+  "independent_variables": ["ramp_angle", "socket_lead_angle"],
+  "part_studios": [
+    {"element_id": "REPLACE_WITH_GOAT_MASTER_ELEMENT_ID", "role": "visual", "part_names": ["Part 1", "Part 2", "Part 3"]},
+    {"element_id": "REPLACE_WITH_CONVEX_COLLISION_STUDIO_ID", "role": "collision", "part_names": ["REPLACE_WITH_ALL_CONVEX_PART_NAMES"]}
+  ]
+}

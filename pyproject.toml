@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aerial-assembly"
+version = "0.1.0"
+description = "Reproducible passive block drop experiments in MuJoCo"
+requires-python = ">=3.11"
+dependencies = ["mujoco==3.13.0", "numpy>=2,<3", "scipy>=1.14,<2", "trimesh>=4.12.2,<5", "requests>=2.32,<3"]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10"]
+cad = ["networkx>=3,<4"]
+video = ["pillow>=12,<13", "imageio>=2.37,<3", "imageio-ffmpeg>=0.6,<1"]
+
+[project.scripts]
+aerial = "aerial_assembly.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

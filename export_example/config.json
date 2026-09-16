@@ -1,0 +1,7 @@
+{
+    "url": "https://cad.onshape.com/documents/8a444d06a7333344848e05ec/w/756db36b9c950329ab945c32/e/caeb00e9ac82f7b591a79890",
+    "robot_name": "goat_master",
+    "output_format": "mujoco",
+    "merge_stls": true,
+    "simplify_stls": true
+}
