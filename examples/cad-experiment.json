@@ -4,6 +4,6 @@
     "contact_timeconst": 0.00005,
     "friction": 0.3
   },
-  "trial": {"duration": 1.0, "dwell": 0.1},
+  "trial": {"duration": 0.3, "dwell": 0.1},
   "release": {"height": 0.01}
 }

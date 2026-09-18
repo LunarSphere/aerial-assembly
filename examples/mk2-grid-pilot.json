@@ -9,5 +9,5 @@
   },
   "rotation_center": "bounds_center",
   "success": {"mode": "reference", "reference_run": "runs/goat-mk2-preview"},
-  "trial": {"duration": 1.0, "dwell": 0.1}
+  "trial": {"duration": 0.3, "dwell": 0.1}
 }

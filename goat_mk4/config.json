@@ -1,8 +1,0 @@
-{
-    "url": "https://cad.onshape.com/documents/9aedd902d9f4dee95f6f5669/w/7949dab0ca2a5f2bbdbe781f/e/c3f00052bf61614c03dc045b",
-    "robot_name": "goat_mk2",
-    "output_format": "mujoco",
-    "merge_stls": false,
-    "simplify_stls": true,
-    "max_stl_size": 0
-}

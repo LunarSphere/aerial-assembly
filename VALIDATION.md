@@ -79,13 +79,16 @@ The saved MK2 preview's final pose passes the reference scorer's pose, stability
 support, and penetration thresholds. Replaying its 31 saved states through
 MuJoCo diagnostics produces six consecutive accepted final frames, spanning
 approximately 50 ms. This is a recorded-frame check, not a new simulation or proof
-of the 100 ms every-timestep dwell. New example grids use one-second trials and
-retain a 100 ms final dwell. No full MK2 grid or new MK2 tolerance envelope has
+of the 100 ms every-timestep dwell. The current example grids use 0.3-second
+trials and retain a 100 ms final dwell; they may time out before a drop settles.
+No full MK2 grid or new MK2 tolerance envelope has
 been measured as part of this implementation.
 
-The full example's dry run counts 301,401 states (81 X offsets, 61 Y offsets,
-61 theta-Y angles, one Z height). See [grid-search conventions](docs/grid-search.md)
-for the accepted-reference scoring definition and the 27-state pilot.
+The original full example's dry run counted 301,401 states. The main example
+and pilot have since been reduced to 27 states each (three X offsets, three Y
+offsets, three theta-Y angles, and one Z height); both pass configuration-only
+dry runs. See [grid-search conventions](docs/grid-search.md) for the
+accepted-reference scoring definition and the current small grid.
 
 ## Historical numerical findings
 

@@ -36,14 +36,19 @@ aerial replay runs/mk2-pilot --trial 0
 aerial render runs/mk2-pilot --trial 0 --out runs/mk2-pilot/state-0.mp4
 ```
 
-The full example covers X=-40..40 mm, Y=-30..30 mm, Z=30 mm, and
-theta-Y=-30..30 degrees, at 1 mm/degree steps: **301,401 states**. The other
-two angles are zero. Enabling all three angles at that resolution makes the
-search much larger. All six axes, including a Z range, are supported; start with
-a coarse grid to measure runtime. A coarse search or refinement of selected
+The main example and pilot now both use X/Y=-5..5 mm in 5 mm steps and
+theta-Y=-5..5 degrees in 5-degree steps. Z is fixed at 30 mm; the other two
+angles are zero. This is **27 states** (3 × 3 × 1 × 1 × 3 × 1), intended for
+an initial simulation check. Run `--dry-run` after changing ranges to validate
+and count them. All six axes, including a nonnegative Z range, are supported.
+A coarse search or refinement of selected
 regions does not establish the exact success fraction of the full fine grid.
 Successful bounds are observed extrema, not a guarantee that everything inside
 the resulting box succeeds.
+
+Both examples use 0.3-second trials with a 0.1-second final dwell.
+The CLI defaults to one second when `trial.duration` is omitted. Shorter trials
+can turn late-settling cases into unsuccessful timeouts.
 
 ## Success definitions
 
