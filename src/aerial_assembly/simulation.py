@@ -28,11 +28,14 @@ def pose_metrics(bundle, pos, quat):
         pts = S.inv().apply(R.apply(leg['surface_probes'])+pos-socket['mouth'])
         tip = S.inv().apply(R.apply(leg['tip'])+pos-socket['mouth'])
         d = -pts[:, 2]
-        if socket['lead_depth']:
+        if 'radius_profile' in socket:
+            profile = np.asarray(socket['radius_profile'])
+            allowed_radius = np.interp(d, profile[:, 0], profile[:, 1])
+        elif socket['lead_depth']:
             blend = np.clip(1-d/socket['lead_depth'], 0, 1)
+            allowed_radius = socket['throat_radius'] + blend*(socket['opening_radius']-socket['throat_radius'])
         else:
-            blend = np.zeros(len(d))
-        allowed_radius = socket['throat_radius'] + blend*(socket['opening_radius']-socket['throat_radius'])
+            allowed_radius = np.full(len(d), socket['throat_radius'])
         allowance = bundle['max_penetration']
         inside.append(bool(np.all((np.linalg.norm(pts[:,:2], axis=1) <= allowed_radius+allowance) &
                                   (d >= -allowance) & (d <= socket['depth']+allowance))))
@@ -42,12 +45,12 @@ def pose_metrics(bundle, pos, quat):
             'insertion_depths': depths, 'max_depth_error': max(depth_errors), 'legs_inside': all(inside)}
 
 
-def contact_metrics(model, data):
+def contact_metrics(model, data, forces=True):
     upper = model.body('upper').id
     lower = model.body('lower').id
     floor = model.geom('catch_floor').id
     penetration, floor_penetration, support, floor_contact = 0.0, 0.0, 0.0, False
-    forces = np.zeros(6)
+    contact_force = np.zeros(6)
     for i, c in enumerate(data.contact):
         b1, b2 = model.geom_bodyid[c.geom1], model.geom_bodyid[c.geom2]
         if upper not in (b1, b2):
@@ -57,9 +60,10 @@ def contact_metrics(model, data):
             floor_penetration = max(floor_penetration, float(-c.dist))
         if lower in (b1, b2):
             penetration = max(penetration, float(-c.dist))
-            mujoco.mj_contactForce(model, data, i, forces)
-            force_world = c.frame.reshape(3,3).T @ forces[:3]
-            support += float(force_world[2]) * (1 if b2 == upper else -1)
+            if forces:
+                mujoco.mj_contactForce(model, data, i, contact_force)
+                force_world = c.frame.reshape(3,3).T @ contact_force[:3]
+                support += float(force_world[2]) * (1 if b2 == upper else -1)
     return {'penetration': penetration, 'floor_penetration': floor_penetration,
             'support_force_z': support, 'floor_contact': floor_contact}
 
@@ -101,7 +105,7 @@ def classify(final, held_for, bundle, settings, invalid_reason=None, touched_flo
     return 'stationary_misalignment', None
 
 
-def run_drop(model, bundle, initial, settings=TrialSettings(), record=True):
+def run_drop(model, bundle, initial, settings=TrialSettings(), record=True, progress=None):
     from .model import set_state
     data = set_state(model, initial)
     dt = float(model.opt.timestep)
@@ -115,6 +119,7 @@ def run_drop(model, bundle, initial, settings=TrialSettings(), record=True):
     touched_floor = final['floor_contact']
     trace = []
     stride = max(1, round(settings.log_interval/dt))
+    progress_stride = max(1, round(.1/dt))
     def log():
         trace.append([float(data.time), *data.qpos.copy().tolist(), *data.qvel.copy().tolist()])
     if record:
@@ -136,6 +141,9 @@ def run_drop(model, bundle, initial, settings=TrialSettings(), record=True):
             held_since = None
         if record and ((step+1) % stride == 0 or step+1 == steps):
             log()
+        if progress and (step+1) % progress_stride == 0:
+            progress(f"Simulated {data.time:.2f}/{settings.duration:g} s; "
+                     f"gap {final['max_seating_gap']*1000:.3f} mm")
     if max_penetration > bundle['max_penetration'] and invalid is None:
         invalid = 'excessive_penetration'
     if np.any(data.warning.number):
@@ -159,6 +167,13 @@ def run_drop(model, bundle, initial, settings=TrialSettings(), record=True):
     return result, np.asarray(trace)
 
 
+def collision_query(model, data):
+    """Update contacts without allocating or solving constraint forces."""
+    mujoco.mj_kinematics(model, data)
+    mujoco.mj_comPos(model, data)
+    mujoco.mj_collision(model, data)
+
+
 def socket_probe_checks(bundle):
     """Independent tiny-sphere queries detect filled bores, missing walls/floors."""
     from .model import build_model
@@ -180,8 +195,14 @@ def socket_probe_checks(bundle):
         R = rotation(socket.get('quat', [1,0,0,0]))
         locations = [('center', [0,0,-socket['depth']/2], False),
                      ('floor', [0,0,-socket['depth']-delta], True)]
-        for label, d, radius in [('bore', (socket['lead_depth']+socket['depth'])/2, socket['throat_radius']),
-                                 ('lead', socket['lead_depth']/2, (socket['throat_radius']+socket['opening_radius'])/2)]:
+        if 'radius_profile' in socket:
+            profile = socket['radius_profile']
+            sections = [(f'profile_{i}', (a[0]+b[0])/2, (a[1]+b[1])/2)
+                        for i, (a, b) in enumerate(zip(profile, profile[1:]))]
+        else:
+            sections = [('bore', (socket['lead_depth']+socket['depth'])/2, socket['throat_radius']),
+                        ('lead', socket['lead_depth']/2, (socket['throat_radius']+socket['opening_radius'])/2)]
+        for label, d, radius in sections:
             if d <= 0:
                 continue
             for a in np.linspace(0,2*np.pi,16,endpoint=False):
@@ -191,7 +212,7 @@ def socket_probe_checks(bundle):
         for label, pos, expected in locations:
             data.qpos[:3] = R.apply(pos)+socket['mouth']
             data.qpos[3:7] = [1,0,0,0]
-            mujoco.mj_forward(model, data)
+            collision_query(model, data)
             hit = any(probe in (c.geom1,c.geom2) and c.dist <= 0 for c in data.contact)
             tests += 1
             if hit != expected:
@@ -201,18 +222,21 @@ def socket_probe_checks(bundle):
 
 def validate_geometry(model, bundle, samples=81):
     """Collision queries only: target and an aligned insertion path, without gravity."""
-    from .model import initial_state, set_state
+    from .model import initial_state
     from .config import Release
     target = [*bundle['target']['pos'], *bundle['target']['quat']]
-    data = set_state(model, {'qpos': target, 'qvel': [0]*6})
-    metric = measure(model, data, bundle)
+    data = mujoco.MjData(model)
+    data.qpos[:] = target
+    collision_query(model, data)
+    metric = {**pose_metrics(bundle, data.qpos[:3], data.qpos[3:7]),
+              **contact_metrics(model, data, forces=False)}
     start = initial_state(bundle, Release(height=0))['qpos'][:3]
     max_path = 0.0
     worst_fraction = 0.0
     for t in np.linspace(0, 1, samples):
         data.qpos[:3] = (1-t)*np.asarray(start) + t*np.asarray(target[:3])
-        mujoco.mj_forward(model, data)
-        penetration = contact_metrics(model, data)['penetration']
+        collision_query(model, data)
+        penetration = contact_metrics(model, data, forces=False)['penetration']
         if penetration > max_path:
             max_path, worst_fraction = penetration, float(t)
     probes = socket_probe_checks(bundle)

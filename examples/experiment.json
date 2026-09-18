@@ -1,6 +1,0 @@
-{
-  "physics": {"timestep": 0.0000125, "friction": 0.3, "contact_timeconst": 0.00005, "contact_dampratio": 1.0},
-  "trial": {"duration": 3.0, "dwell": 0.5},
-  "release": {"height": 0.01, "offset": [0.0, 0.0], "rpy_deg": [0.0, 0.0, 0.0]},
-  "envelope": {"height": [0.01, 0.05], "offset": [0.005, 0.005], "rpy_deg": [5.0, 5.0, 10.0]}
-}

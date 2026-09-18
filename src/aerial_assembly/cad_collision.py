@@ -5,8 +5,109 @@ half-space cuts. All boundaries come from the exported triangles/rings. This
 retains guide lips and socket facets without a stochastic decomposition pass.
 """
 import numpy as np
+from itertools import combinations
 from scipy.spatial import ConvexHull, QhullError
 import trimesh
+
+
+def partition_solid(mesh):
+    """Constrained tetrahedra, merged only when their union is convex.
+
+    Preserve the input surface and its cavities; do not remesh or convexify the
+    complete part. The original mesh still supplies visuals and mass properties.
+    """
+    import tetgen
+    # Remove STL float noise below the existing 0.5 um approximation budget.
+    # Each coordinate moves <= 0.05 um; visuals and mass stay on the source mesh.
+    surface = trimesh.Trimesh(vertices=np.round(mesh.vertices, 7), faces=mesh.faces, process=True)
+    surface.update_faces(surface.nondegenerate_faces())
+    surface.remove_unreferenced_vertices()
+    if not surface.is_volume:
+        raise ValueError('Collision vertex cleanup damaged the single-solid surface')
+    nodes, elements = tetgen.TetGen(surface.vertices, surface.faces).tetrahedralize(switches='pQ')[:2]
+    cells = nodes[elements[:, :4]]
+    volumes = abs(np.linalg.det(cells[:, 1:]-cells[:, :1]))/6
+    if not np.isclose(volumes.sum(), mesh.volume, rtol=2e-5, atol=1e-12):
+        raise ValueError('Single-solid tetrahedralization changed source volume')
+    groups = {i: set(map(int, cell)) for i, cell in enumerate(elements[:, :4])}
+    owners = np.arange(len(elements))
+    members = {i: {i} for i in groups}
+    neighbors = {i: set() for i in groups}
+    faces = {}
+    edge_stars = {}
+    for i, cell in enumerate(elements[:, :4]):
+        for edge in combinations(sorted(cell), 2):
+            edge_stars.setdefault(edge, []).append(i)
+        for skip in range(4):
+            face = tuple(sorted(np.delete(cell, skip)))
+            other = faces.pop(face, None)
+            if other is None:
+                faces[face] = i
+            else:
+                neighbors[i].add(other)
+                neighbors[other].add(i)
+    def merge(candidates):
+        candidates = set(candidates)
+        if len(candidates) < 2:
+            return False
+        ids = set().union(*(groups[i] for i in candidates))
+        if len(ids) > 128:
+            return False
+        try:
+            convex = ConvexHull(nodes[sorted(ids)])
+        except QhullError:
+            return False
+        volume = sum(volumes[i] for i in candidates)
+        if not np.isclose(convex.volume, volume, rtol=1e-8, atol=1e-18):
+            # Fill a candidate hull only with existing material cells. This can
+            # close a nonconvex intermediate union without filling a CAD void.
+            checked = set(candidates)
+            pending = set().union(*(neighbors[i] for i in candidates))-checked
+            while pending:
+                k = pending.pop()
+                checked.add(k)
+                points = nodes[sorted(groups[k])]
+                if np.all(points @ convex.equations[:, :3].T + convex.equations[:, 3] <= 1e-10):
+                    candidates.add(k)
+                    ids.update(groups[k])
+                    volume += volumes[k]
+                    pending.update(neighbors[k]-checked)
+        if not np.isclose(convex.volume, volume, rtol=1e-8, atol=1e-18):
+            return False
+        keep = min(candidates)
+        adjacent = set().union(*(neighbors[i] for i in candidates))-candidates
+        combined = set().union(*(members[i] for i in candidates))
+        for k in adjacent:
+            neighbors[k].difference_update(candidates)
+            neighbors[k].add(keep)
+        for i in candidates-{keep}:
+            del groups[i], neighbors[i], members[i]
+        groups[keep], neighbors[keep], members[keep] = ids, adjacent, combined
+        volumes[keep] = volume
+        owners[list(combined)] = keep
+        return True
+
+    # An edge-star can form a convex cell even when no pairwise intermediate
+    # union is convex. Merge those first, then adjacent pairs, until stable.
+    changed = True
+    while changed:
+        changed = False
+        for star in edge_stars.values():
+            changed |= merge(owners[star])
+        for i in sorted(groups):
+            if i not in groups:
+                continue
+            for j in sorted(neighbors[i]):
+                if j not in groups:
+                    continue
+                if merge([i, j]):
+                    changed = True
+                    if i not in groups:
+                        break
+    pieces = [trimesh.convex.convex_hull(nodes[sorted(ids)]) for ids in groups.values()]
+    if not np.isclose(sum(p.volume for p in pieces), mesh.volume, rtol=2e-5, atol=1e-12):
+        raise ValueError('Single-solid convex merging changed source volume')
+    return pieces
 
 
 def hull(vertices):

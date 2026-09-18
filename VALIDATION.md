@@ -1,66 +1,87 @@
 # Validation evidence
 
-All geometry used for this evidence is synthetic; none of these results evaluates the actual Onshape design or a physical printed block.
+## Current verification
 
-## Numerical findings
+The retained automated checks cover gravity, deterministic trajectories,
+release frame conversion, seating and final dwell, timestep refinement,
+invalid starts, quaternion sign invariance, socket material checks, convex
+partitioning, and local MJCF transforms/scaling. CLI tests cover single-trial
+outputs, removed options, overwrite protection, diagnostic outcomes, and
+preservation of recordings after rendering failure.
 
-| Experiment | Outcome |
-|---|---|
-| Original proposed dt=250 µs, contact time constant=5 ms | About 2 mm receiver penetration; rejected |
-| Aligned, 3 seconds, dt=25 µs, contact time constant=50 µs | Success; peak penetration 2.92 µm |
-| Aligned, 3 seconds, final default dt=12.5 µs, contact time constant=50 µs | Success; peak penetration 20.28 µm; settles at approximately 0.154 s |
-| Aligned, dt=12.5 µs versus 6.25 µs | Both succeed; peak penetration approximately 20.3 and 22.4 µm |
-| 1 mm X offset, 0.6 seconds, dt=25 µs versus 12.5 µs | Timeout versus success: coarse convergence check failed |
-| 1 mm X offset, 0.6 seconds, dt=12.5 µs versus 6.25 µs | Both succeed; final position error approximately 0.199 and 0.079 mm |
-| Deliberate miss, dt=25 µs versus 12.5 µs | Both classified as missed receiver |
-| Three narrow-envelope random trials, dt=25 µs | Three valid successes; pipeline smoke test only |
-| Two synthetic lead-angle candidates, one shared narrow-envelope sample | Both valid; ranking pipeline completed, no statistical design conclusion |
+The cleanup was checked on macOS with Python 3.13.13 and MuJoCo 3.13.0:
+the independent suite passed all 39 tests. Running the four export integration
+tests separately produced four explicit setup errors for the missing assets.
+Dependency compatibility and Python compilation checks passed. Video rendering
+of a saved synthetic test trajectory produced an MP4 and start/end PNGs using
+`MUJOCO_GL=cgl` outside the sandbox. Interactive replay was not launched.
 
-The supported conclusion is that the baseline pipeline works and finer resolution was necessary for the tested offset. This is not a full capture-region or mesh-convergence validation. Collision-resolution sweeps and actual-material calibration remain gates before interpreting geometry optimization.
+Run `python -m pytest -q` for the full suite. Tests marked `requires_export`
+require the original `export_example/assets/`, which is missing in this checkout.
+They fail explicitly when those assets are absent. Use
+`python -m pytest -q -m 'not requires_export'` to include the available `goat_mk2`
+integration check while excluding the missing original export. Tests marked
+`requires_mk2` require that local single-piece export; exclude both markers for
+synthetic checks only.
 
-The local `runs/` directory contains raw JSON, trajectories where requested, and the intentionally preserved unsuccessful coarser convergence report. **`runs/default-final` is the three-second run with final default settings.** `runs/aligned-validated` is the earlier three-second 25 µs result. `runs/convergence-validated` is a **failed** 25→12.5 µs diagnostic; its filename does not imply a pass. `runs/refinement-offset-600ms.json` records the successful 6.25 µs offset test. Subsequent runs record source-file hashes as well as package versions.
+After restoring the original assets, run the complete suite and a one-second
+`aerial cad-drop export_example --out runs/baseline`. Compare the outcome,
+seating gap, penetration, and trajectory against the original implementation
+under the same dependency versions and settings. Check replay/video separately
+on a supported graphics environment.
 
-## Automated checks
+## Single-piece GOAT Mk2
 
-`python -m pytest -q`: **23 passed** with the final default timestep. `python -m pip check`: no broken requirements.
+The local single-solid adapter measures approximately 25.33 mm peg length and
+22.67 mm receiving socket depth. It follows the socket surface separately from
+the deeper hollow peg interior. The nominal flush target therefore has 2.67 mm
+of axial bottoming; the loader does not modify the part to make it seat.
 
-Tests cover free fall, deterministic replay, initial-state velocity/frame conversion, stable seating, aligned timestep refinement, deliberate misses, intersecting starts, final-dwell enforcement, quaternion sign invariance, closed and missing socket material, concave-mesh rejection, STL unit conversion, geometry hash verification, seeded uncertainty, confidence intervals, candidate rejection, preservation of derived Onshape expressions, redirect signing, credential-host isolation, API quotas, and rate-limit retry.
+The final constrained mesh partition has 2,770 convex pieces. Collision vertices
+use a 0.1 µm grid; original visuals and mass properties remain unchanged. Volume
+checks and all 132 socket-material probes pass. Static geometry checks use
+collision queries without solving forces at deeply interpenetrating poses.
+Large collision models receive a larger MuJoCo contact-memory arena.
 
-Headless simulation and CLI commands have been exercised. The graphical replay viewer is provided but was not launched here. Onshape behavior is tested with mocked responses, not against a live account.
+Regression checks cover translation/scaling of measured features, rejection of
+unsupported axes, preservation of hollow spaces and material, profile-based
+bottoming detection, and the actual Mk2 export. The original timestep, friction,
+and contact-response defaults are retained. This detailed collision partition
+is slow during contact; short previews use an explicit shorter trial duration.
 
-## Onshape-to-robot importer
+With the final adapter, `python -m pytest -q -m 'not requires_export'` passed
+all 44 tests, including the Mk2 integration check. Four tests for the missing
+original export were deselected.
 
-The existing 23 tests and seven importer tests pass. The full suite passed with
-the initial five importer tests (28 total); the final expanded importer suite
-passed separately (seven tests).
+The recorded 0.3-second preview is in `runs/goat-mk2-preview/`, using
+`runs/goat-mk2-preview-config.json`. It completed with valid numerics and outcome
+`stationary_misalignment`: maximum final seating gap 2.998 mm, peak penetration
+13.61 µm against the 50 µm budget, and no solver warnings. Both peg tips reached
+approximately 22.667 mm insertion. Final COM speed was 0.0057 mm/s. The mass
+remains provisional at 12.982 g with uniform effective density 600 kg/m³.
+This is an initial-settling preview, not a full one-second or convergence study.
 
-Importer checks cover a rotated/translated export passing socket and insertion
-validation, rotated rigid-child inertia aggregation, scaled external STL assets,
-site references, export diagnostics, incorrect bounds, and overwrite protection.
+## Historical numerical findings
 
-`aerial inspect-mjcf export_example/robot.xml --out runs/export-inspection.json`
-exits 2 as expected: three floating roots, placeholder mass properties,
-nonfinite colors, and a concave main-body collider. This is inspection of the
-actual supplied export, not validation of its assembly performance. The local
-drop of the prepared model is documented below; no live CAD export was performed.
+These observations predate the simplification and are not fresh verification
+of the incomplete export in this checkout.
 
-## Automated GOAT download workflow
+Synthetic fixture:
+- The original 250 µs timestep and 5 ms contact time constant allowed roughly
+  2 mm of receiver penetration.
+- The retained defaults are a 12.5 µs timestep and 50 µs contact time constant.
+  A three-second aligned run seated with about 20.28 µm peak penetration.
+- A 1 mm offset disagreed at 25 versus 12.5 µs; 12.5 versus 6.25 µs both seated.
+  A coarse run alone is insufficient evidence of numerical convergence.
 
-The local `cad-drop` adapter now prepares and simulates the actual supplied
-export. Evidence is in `runs/goat-export-first/`, with the fully framed video
-at `drop-framed.mp4`. The one-second aligned drop is numerically valid:
+Original GOAT export:
+- A one-second aligned drop was numerically valid with a final seating gap of
+  approximately 4.007 mm and outcome `stationary_misalignment`.
+- Peak penetration was approximately 21.74 µm within the roughly 25 µm budget.
+- All 132 socket probes passed. The 38 mm pegs exceeded socket depth by 4 mm.
+- Provisional mass was 113.894 g at uniform effective density 600 kg/m³.
+- Collision preparation produced 693 convex pieces while preserving open sockets.
 
-- Final seating gap: approximately 4.007 mm; outcome `stationary_misalignment`.
-- Maximum contact penetration: approximately 21.74 micrometers, within the
-  approximately 25 micrometer budget.
-- All 132 socket probes pass. At the intended target, the 38 mm pegs intersect
-  the floors of the 34 mm sockets by approximately 4 mm.
-- The three rigidly combined source solids have provisional mass 113.894 g
-  under a uniform effective density of 600 kg/m³. This is not a measured mass.
-- The original visual meshes are retained. Collision geometry has 693 convex
-  pieces; it is derived from the side profile and socket rings, checked for
-  volume preservation, and does not fill the sockets.
-
-This single aligned run is a preview, not a sampled success-rate estimate.
-The preparation and simulation run locally; no Onshape document was modified.
-The full 35-test suite passed after adding the initial five CAD-workflow tests.
+These are software and geometry checks, not evidence of calibrated physical
+assembly performance. Printed dimensions, mass distribution, friction, and
+rebound need measurement. Synthetic test geometry is not the actual CAD design.

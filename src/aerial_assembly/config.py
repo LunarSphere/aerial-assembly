@@ -84,27 +84,3 @@ class Release:
             raise ValueError("Release vectors have wrong lengths")
         if not np.isfinite(values).all() or self.height < 0:
             raise ValueError("Release values must be finite and height nonnegative")
-
-
-@dataclass(frozen=True)
-class Envelope:
-    height: tuple = (0.01, 0.05)
-    offset: tuple = (0.005, 0.005)
-    rpy_deg: tuple = (5.0, 5.0, 10.0)
-    velocity: tuple = (0.0, 0.0, 0.0)
-    angular_velocity: tuple = (0.0, 0.0, 0.0)
-
-    def sample(self, count, seed):
-        if count < 1 or len(self.height) != 2 or self.height[0] < 0 or self.height[1] < self.height[0]:
-            raise ValueError("Invalid sample count or height interval")
-        if len(self.offset) != 2 or any(len(v) != 3 for v in (self.rpy_deg, self.velocity, self.angular_velocity)):
-            raise ValueError("Envelope vectors have wrong lengths")
-        if not np.isfinite([*self.height, *self.offset, *self.rpy_deg, *self.velocity, *self.angular_velocity]).all():
-            raise ValueError("Envelope must be finite")
-        if any(x < 0 for v in (self.offset, self.rpy_deg, self.velocity, self.angular_velocity) for x in v):
-            raise ValueError("Envelope half-widths must be nonnegative")
-        rng = np.random.default_rng(seed)
-        def symmetric(widths):
-            return tuple(rng.uniform(-np.asarray(widths), np.asarray(widths)).tolist())
-        return [Release(float(rng.uniform(*self.height)), symmetric(self.offset), symmetric(self.rpy_deg),
-                        symmetric(self.velocity), symmetric(self.angular_velocity)) for _ in range(count)]

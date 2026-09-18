@@ -1,120 +1,85 @@
-# Download, drop, tweak, repeat
+# Local export → drop → inspect
 
-The GOAT adapter prepares the downloaded three-part block locally. You do not
-need to fix the assembly's exported free joints or rewrite seating metadata
-between design iterations. Keep each download in its own directory with
-`robot.xml` and its `assets/` folder intact.
+## Prepare the input
 
-## Watch a drop of your actual export
+Use a local export directory containing `robot.xml` and every referenced asset.
+The original GOAT profile supports three unmerged visual solids: two vertical
+circular pegs and an extruded body with two blind tapered sockets. The
+single-piece profile supports the two pointed vertical pegs and circular blind
+sockets in `goat_mk2`, including its hollow pegs and thin supporting walls. Keep
+`merge_stls: false` and mesh simplification disabled when exporting.
+Unsupported topology fails explicitly. This is not a general CAD importer.
 
-```bash
-source .venv/bin/activate
-aerial cad-drop export_example --out runs/goat-v1 --video
-```
+The supplied `export_example` currently lacks its `assets/` directory. Restore
+the matching original files; do not mix exports from different revisions.
+Preparation reads XML and meshes, never executes exporter pickle files, and
+leaves the input export untouched.
 
-This prepares one rigid block, duplicates it into fixed/lower and falling/upper
-bodies, records a one-second aligned drop and writes `runs/goat-v1/drop.mp4`.
-The video plays at half speed and holds the last frame for inspection. It also
-writes start/end PNGs. For an interactive viewer on a machine with a display:
-
-```bash
-aerial replay runs/goat-v1
-aerial replay runs/goat-v1 --collisions
-```
-
-Video can be rendered later without repeating the physics:
+## Run and view
 
 ```bash
-aerial render runs/goat-v1 --out runs/goat-v1/replay.mp4
+aerial cad-drop export_example --out runs/drop --video
+aerial replay runs/drop
+aerial replay runs/drop --collisions
+aerial render runs/drop --out runs/drop/another-view.mp4
 ```
 
-Install additional dependencies in a fresh environment with
-`python -m pip install -e '.[cad,video]'`. Headless rendering defaults to EGL;
-the tested versions are also available via `pip install -r requirements-cad.lock`.
-set `MUJOCO_GL=osmesa` where appropriate if EGL is unavailable. A video-rendering
-failure does not discard the recorded simulation.
+Each run directory must be new. Video plays at half speed, holds the final frame,
+and saves start/end PNGs. Install video support with
+`python -m pip install -e '.[video]'`.
 
-## Compare Onshape revisions
+The existing renderer defaults to EGL. Select an available backend using
+`MUJOCO_GL` where needed; graphical support depends on your platform. Interactive
+replay on macOS uses `mjpython -m aerial_assembly.cli replay runs/drop`.
+Rendering failure does not discard recorded results.
 
-1. Download/export the current CAD into a new directory.
-2. Run an aligned `cad-drop` to check engagement and the video.
-3. Evaluate randomized drops with the same configuration, seed and count:
+Use `--config examples/cad-experiment.json` to customize the single drop. Supported
+sections are `physics`, `trial`, and `release`. An omitted trial duration/dwell
+defaults to 1 second/0.1 seconds. The release defaults to aligned, from rest,
+with 10 mm additional clearance above separated world-axis bounding boxes.
+Offsets, angles, and initial velocities can be specified for that one release.
+There is no random sampling or ranking.
 
-```bash
-aerial cad-drop downloads/goat-v1 --config examples/cad-experiment.json \
-  --count 100 --seed 42 --out runs/goat-v1-score
-```
+## What preparation preserves
 
-4. Change parameters in Onshape, export into `downloads/goat-v2`, then run:
+- Combines exported parts in their assembly positions into one rigid block.
+- Remeasures peg/socket dimensions, seating points, and the target transform.
+- Partitions collision solids while retaining socket openings, blind floors,
+  ramps, and guide lips. Original visual surfaces remain unchanged.
+- Reuses cached partitions only for matching geometry and preparation code;
+  cached contents are checked by hash.
+- Computes mass, COM, and inertia from original solids, ignoring placeholder
+  exported inertias. Default density is provisional 600 kg/m³.
+  `--mass-grams VALUE` supplies total mass but still assumes uniform distribution.
 
-```bash
-aerial cad-drop downloads/goat-v2 --config examples/cad-experiment.json \
-  --count 100 --seed 42 --out runs/goat-v2-score
-aerial cad-rank runs/goat-v1-score runs/goat-v2-score
-```
+Single-piece exports use constrained tetrahedralization followed by convex
+merging, with volume checks before and after merging. Collision vertices are
+snapped to a 0.1 µm grid to regularize STL noise (at most 0.087 µm displacement);
+visuals stay unchanged. The cavities are retained. Feature recognition follows inward-facing socket
+surfaces so a separate hollow peg interior cannot be mistaken for socket depth.
+Seating points come from matching planar surfaces. Piecewise socket radii are
+used for insertion scoring and material probes. This conversion can produce
+thousands of collision pieces and takes longer to simulate than the original
+extruded-body profile; prepared pieces are cached between runs.
 
-The objective is successful-seating fraction, maximized; lower mean settling
-time breaks ties. An aligned preview is not eligible for ranking. The ranking
-command rejects comparisons with different release samples, physics, mass
-policy or preparation code. Change only CAD design variables during a search.
-After choosing finalists, use independent seeds, more trials and timestep
-refinement. A finite search improves the measured objective; it cannot certify
-a global maximum.
+## Inspect the result
 
-The Onshape tweaking/downloading step is manual in this workflow. No live CAD
-variables are changed by `cad-drop`; it consumes each downloaded revision.
+Read `summary.json` for the outcome, numerical validity, seating gap,
+penetration, mass assumption, and geometry feasibility. Detailed diagnostics
+are in `geometry_validation.json` and `trial_00000/result.json`.
+The recorded trajectory, scene, geometry, configuration, and source/code hashes
+remain alongside them.
 
-## What is automated
+The original baseline's 38 mm pegs bottom out in 34 mm sockets. Preparation
+reports this and records a diagnostic drop without changing the target or
+geometry. Valid physical failures return exit status 0; numerical errors and
+unverified collision geometry return 2. A geometry-rejected run cannot report
+successful seating.
 
-- Combines the three exported solids in their assembly positions into one rigid
-  block, eliminating the unintended independently falling legs.
-- Measures the two vertical pegs and each socket's floor, throat and mouth
-  rings from the current export. The target transform, dimensions, clearance,
-  seating points and surface probes are regenerated for every revision.
-- Builds collision pieces from the body's extruded side profile and socket
-  frusta. The guide lips, ramps, blind floors and circular facets are retained.
-  The body volume is checked against the original mesh and socket probes verify
-  empty space, wall material and floor material. Floating-point ring noise is
-  regularized within 0.2 micrometers; collision vertices snap to 0.1 micrometers.
-  Original visual surfaces stay unchanged. Cached partitions are hashed and
-  reused only for the same geometry, socket features and preparation code.
-- Replaces NaN export colors with the experiment's lower/upper colors.
-- Computes mass, COM and inertia from the original watertight solids, never
-  from overlapping or approximated collision pieces. Default effective density
-  is **provisional 600 kg/m³**. Add `--mass-grams VALUE` to supply measured total
-  mass; its spatial distribution is still assumed uniform. All results retain
-  this mass assumption. The adapter deliberately does not trust the supplied
-  export's `1e-9` placeholder inertias.
-- Saves source-file hashes, available CAD microversions, inferred geometry,
-  physics, releases, code hashes, collision checks, numerical validity, score,
-  and the first trial's trajectory. Source downloads remain untouched.
+The supplied `goat_mk2` has approximately 25.33 mm pegs and 22.67 mm deep receiving
+sockets, giving 2.67 mm of nominal axial bottoming. The deeper hollow spaces in
+the pegs are separate cavities. The simulator records this geometry as supplied.
 
-This profile supports the current topology: three unmerged visual solids, two
-vertical circular pegs, and an extruded body with two blind tapered sockets.
-Changing ramp/lead-in angles, compatible lengths or clearances is supported by
-remeasurement. Changing the topology or orientation fails explicitly rather
-than silently reusing dimensions. Export with STL simplification disabled and
-keep visual parts unmerged (`merge_stls: false`). The local profile prepares its
-own colliders, so exporter-side convex decomposition is unnecessary.
-
-## The supplied baseline
-
-The measured peg length is 38 mm; the socket depth is 34 mm. At the intended
-flush pose the tips penetrate the blind floors by about 4 mm. The workflow
-reports this infeasible design and still records a physical drop. It does not
-shorten the pegs, deepen the sockets, soften contacts to fake insertion, or move
-the success target to the jammed pose.
-
-An interfering target receives objective zero only when collision probes and
-numerical checks pass. Collider/numerical failures have a null objective and
-are excluded. For a geometrically rejected design, one diagnostic drop is
-recorded and the remaining random trials are skipped; the zero comes from the
-infeasible target, not a claimed 100-trial measurement. A failed aligned path
-check without proven target interference has no score. Check
-`geometry_validation.json` and `summary.json`. To remove
-the baseline bottoming conflict, adjust peg length or socket depth in Onshape
-while retaining adequate floor thickness, then download and repeat.
-
-These outputs use a separate CAD-workflow bundle in each run. For the stricter
-general importer, which requires explicit metadata and valid CAD inertias,
-see [onshape-to-robot.md](onshape-to-robot.md).
+Physics settings are numerical debugging defaults, not calibrated material
+properties. Retain timestep-refinement and collision checks when changing the
+model; do not interpret one drop as a capture probability.

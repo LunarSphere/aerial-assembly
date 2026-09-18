@@ -5,13 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "aerial-assembly"
 version = "0.1.0"
-description = "Reproducible passive block drop experiments in MuJoCo"
+description = "A local CAD block drop in MuJoCo"
 requires-python = ">=3.11"
-dependencies = ["mujoco==3.13.0", "numpy>=2,<3", "scipy>=1.14,<2", "trimesh>=4.12.2,<5", "requests>=2.32,<3"]
+dependencies = ["mujoco==3.13.0", "numpy>=2,<3", "scipy>=1.14,<2", "trimesh>=4.12.2,<5", "tetgen>=0.8.4,<0.9"]
 
 [project.optional-dependencies]
 test = ["pytest>=8,<10"]
-cad = ["networkx>=3,<4"]
 video = ["pillow>=12,<13", "imageio>=2.37,<3", "imageio-ffmpeg>=0.6,<1"]
 
 [project.scripts]
@@ -22,3 +21,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "requires_export: requires original export_example/assets meshes (fails explicitly if absent)",
+    "requires_mk2: requires the local goat_mk2 single-solid export (fails explicitly if absent)",
+]

@@ -1,4 +1,0 @@
-{
-  "trial": {"duration": 0.6, "dwell": 0.1},
-  "envelope": {"height": [0.01, 0.01], "offset": [0.0001, 0.0001], "rpy_deg": [0.0, 0.0, 0.0]}
-}

@@ -1,5 +1,5 @@
 import pytest
-from aerial_assembly.geometry import demo_geometry
+from synthetic import demo_geometry
 from aerial_assembly.model import build_model
 
 

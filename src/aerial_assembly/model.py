@@ -16,6 +16,8 @@ def numbers(values):
 def build_model(bundle, physics=Physics()):
     root = ET.Element('mujoco', model=bundle['name'])
     ET.SubElement(root, 'compiler', angle='radian', inertiafromgeom='false')
+    if len(bundle['collision']) > 1000:
+        ET.SubElement(root, 'size', memory='128M')
     option = ET.SubElement(root, 'option', timestep=str(physics.timestep), gravity='0 0 -9.81',
                            integrator='implicitfast', solver='Newton', cone='elliptic',
                            iterations=str(physics.iterations), tolerance='1e-10')

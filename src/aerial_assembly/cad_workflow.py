@@ -1,4 +1,4 @@
-"""Download/test/repeat adapter for the GOAT two-peg CAD family.
+"""Local drop preparation for the GOAT two-peg CAD family.
 
 Feature recognition is deliberately limited to two vertical circular pegs and
 blind coaxial tapered sockets. Unsupported topology fails instead of reusing
@@ -11,8 +11,7 @@ from pathlib import Path
 import numpy as np
 import trimesh
 
-from .config import Envelope, Physics, Release, TrialSettings, digest, read_json, write_json
-from .experiments import save_trial, summarize
+from .config import Physics, Release, TrialSettings, digest, read_json, write_json
 from .geometry import bounds_points, part_mesh
 from .mjcf import _load, _parts
 from .model import build_model, initial_state
@@ -21,8 +20,11 @@ from .simulation import run_drop, validate_geometry
 
 def recognize_features(meshes):
     """Measure the current export, including designs that cannot fully seat."""
+    if len(meshes) == 1:
+        from .cad_single import recognize_single
+        return recognize_single(meshes[0])
     if len(meshes) != 3:
-        raise ValueError('GOAT profile expects three unmerged visual solids: two pegs and the body; export with merge_stls=false')
+        raise ValueError('GOAT profile expects one supported solid or three unmerged solids: two pegs and the body')
     ordered = sorted(meshes, key=lambda m: m.volume)
     pegs, body = ordered[:2], ordered[2]
     pegs.sort(key=lambda m: m.bounds[:, 0].mean())
@@ -114,10 +116,11 @@ def prepare_download(directory, *, density=600., mass_grams=None, collision_erro
     if any(not m.is_volume for m in meshes):
         raise ValueError('Source visual solids must be watertight and consistently oriented')
     features = recognize_features(meshes)
+    if len(meshes) == 1 and collision_error < np.sqrt(3)*.5e-7:
+        raise ValueError('Single-solid collision error budget must cover the 0.1 micrometer vertex grid')
     if collision_error > features['clearance']*.11:
         raise ValueError('Collision approximation budget exceeds 11% of measured functional clearance')
-    # Export placeholders are never used. The three original solids meet at faces;
-    # collision partitions do not participate in mass calculations.
+    # Export placeholders and collision partitions never determine mass properties.
     effective_density = density if mass_grams is None else mass_grams/1000/sum(m.volume for m in meshes)
     inertial = _inertia(meshes, effective_density)
     inertial['provenance'] = ('Provisional uniform effective density' if mass_grams is None else
@@ -128,9 +131,15 @@ def prepare_download(directory, *, density=600., mass_grams=None, collision_erro
     revisions = sorted({read_json(p).get('documentMicroversion') for p in directory.rglob('*.part')
                         if read_json(p).get('documentMicroversion')})
     collision = []
-    from .cad_collision import partition_body
+    from .cad_collision import partition_body, partition_solid
     options = {'method': 'extruded-profile-minus-socket-frusta', 'version': 1, 'plane_tolerance_m': 1e-8,
                'vertex_snap_m': 1e-7, 'implementation_sha256': hashlib.sha256(Path(__file__).with_name('cad_collision.py').read_bytes()).hexdigest()}
+    if len(meshes) == 1:
+        import tetgen
+        options = {'method': 'constrained-tetrahedra-convex-unions', 'version': 1,
+                   'tetgen_version': tetgen.__version__, 'switches': 'pQ',
+                   'vertex_snap_m': 1e-7,
+                   'implementation_sha256': options['implementation_sha256']}
     for i, mesh in enumerate(meshes):
         if mesh.is_convex:
             pieces = [mesh]
@@ -144,7 +153,7 @@ def prepare_download(directory, *, density=600., mass_grams=None, collision_erro
                 pieces = [trimesh.Trimesh(vertices=p['vertices'], faces=p['faces'], process=False) for p in saved['parts']]
             else:
                 progress(f'Partitioning CAD solid {i+1}, preserving exported socket facets…')
-                pieces = partition_body(mesh, features['sockets'])
+                pieces = partition_solid(mesh) if len(meshes) == 1 else partition_body(mesh, features['sockets'])
                 if any(not p.is_volume or not p.is_convex for p in pieces):
                     raise ValueError('Decomposition produced a nonconvex or invalid collision solid')
                 saved = [{'vertices': p.vertices.tolist(), 'faces': p.faces.tolist()} for p in pieces]
@@ -165,16 +174,19 @@ def prepare_download(directory, *, density=600., mass_grams=None, collision_erro
     return bundle
 
 
-def cad_drop(directory, output, *, density=600., mass_grams=None, count=1, seed=42,
-             physics=Physics(), settings=TrialSettings(duration=1., dwell=.1),
-             envelope=Envelope(), release=Release(), collision_error=.0000005, cache='assets/cad-cache', progress=print):
-    """Save an actual drop even when the requested CAD seating pose is infeasible.
+def save_trial(directory, result, trace):
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=False)
+    write_json(directory/'result.json', result)
+    np.savez_compressed(directory/'trajectory.npz', state=trace,
+                        columns=np.array(['time','x','y','z','qw','qx','qy','qz',
+                                          'vx','vy','vz','wx_local','wy_local','wz_local']))
 
-An impossible design gets objective zero only if the collision probes pass;
-unverified colliders or numerically invalid trials never enter a ranking.
-"""
-    if count < 1:
-        raise ValueError('Trial count must be positive')
+
+def cad_drop(directory, output, *, density=600., mass_grams=None,
+             physics=Physics(), settings=TrialSettings(duration=1., dwell=.1),
+             release=Release(), collision_error=.0000005, cache='assets/cad-cache', progress=print):
+    """Record one local drop, including diagnostic drops of infeasible geometry."""
     output = Path(output)
     output.mkdir(parents=True, exist_ok=False)
     bundle = prepare_download(directory, density=density, mass_grams=mass_grams,
@@ -183,65 +195,34 @@ unverified colliders or numerically invalid trials never enter a ranking.
     model, xml = build_model(bundle, physics)
     (output/'scene.xml').write_text(xml)
     gate = validate_geometry(model, bundle)
-    # Report known CAD infeasibility separately from collision representation errors.
-    bottoming = [max(0., leg['target_depth']-socket['depth']) for leg,socket in zip(bundle['legs'],bundle['sockets'])]
+    bottoming = [max(0., leg['target_depth']-socket['depth'])
+                 for leg, socket in zip(bundle['legs'], bundle['sockets'])]
     target_infeasible = (max(bottoming) > bundle['max_penetration'] or
                          gate['target']['penetration'] > bundle['max_penetration'])
     gate['peg_bottoming_m'] = bottoming
     write_json(output/'geometry_validation.json', gate)
-    releases = [release] if count == 1 else envelope.sample(count, seed)
-    experiment = {'seed': seed if count > 1 else None, 'releases': [asdict(r) for r in releases],
-                  'physics': asdict(physics), 'settings': asdict(settings),
-                  'objective': 'maximize successful seating fraction; tie-break by lower mean settling time',
-                  'aligned_preview_only': count == 1}
-    experiment['comparison_key'] = digest({k:v for k,v in experiment.items() if k != 'objective'} | {
-        'mass_policy': {'density': density} if mass_grams is None else {'measured_mass': True, 'distribution': 'uniform'},
-        'collision_error': collision_error, 'collision_method': bundle['source']['collision'],
-        'physics_code_sha256': {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
-                               for name in ['model.py','simulation.py','config.py','geometry.py']},
-        'workflow_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(), 'profile': 'goat-v1'})
-    write_json(output/'experiment.json', experiment)
+    write_json(output/'experiment.json', {'release': asdict(release), 'physics': asdict(physics),
+                                         'settings': asdict(settings)})
     write_json(output/'code_hashes.json', {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
                                           for p in Path(__file__).parent.glob('*.py')})
-    results = []
-    # A proven interfering target cannot succeed under any release. Record one
-    # diagnostic drop, but do not spend a whole sampling budget on that design.
-    evaluated = releases[:1] if not gate['passed'] else releases
     if not gate['passed']:
-        progress('Geometry gate failed: recording one diagnostic drop; remaining sampled trials will be skipped.')
-    for i, release in enumerate(evaluated):
-        progress(f'Drop {i+1}/{count}: simulating {settings.duration:g} seconds…')
-        result, trace = run_drop(model, bundle, initial_state(bundle, release), settings, record=i == 0)
-        if not gate['passed'] and result['status'] == 'success':
-            result['status'] = 'geometry_rejected'
-            result['settling_time'] = None
-        save_trial(output/f'trial_{i:05d}', result, trace)
-        results.append(result)
-        progress(f"Drop {i+1}: {result['status']}; gap {result['final']['max_seating_gap']*1000:.3f} mm")
-        summary = summarize(results, iid=count > 1 and gate['passed'])
-        trustworthy = (gate['socket_probes']['passed'] and summary['invalid_fraction'] == 0
-                       and (gate['passed'] or target_infeasible))
-        summary.update(objective_value=(summary['success_fraction_all_attempts'] if gate['passed'] else 0.) if trustworthy else None,
-                       eligible_for_ranking=trustworthy and count > 1,
-                       geometry_feasible=gate['passed'], collision_probes_passed=gate['socket_probes']['passed'],
-                       comparison_key=experiment['comparison_key'], provisional_mass=mass_grams is None,
-                       preview_only=count == 1, peg_bottoming_m=bottoming,
-                       requested_trials=count, target_infeasible=target_infeasible,
-                       evaluation_method='sampled_drops' if gate['passed'] else 'geometry_rejection_with_recorded_drop',
-                       objective='seating_success_fraction', geometry_hash=bundle['asset_hash'])
-        write_json(output/'summary.json', summary)
+        progress('Geometry checks failed: recording a diagnostic drop; inspect geometry_validation.json.')
+    progress(f'Drop: simulating {settings.duration:g} seconds…')
+    result, trace = run_drop(model, bundle, initial_state(bundle, release), settings,
+                             record=True, progress=progress)
+    if not gate['passed'] and result['status'] == 'success':
+        result['status'] = 'geometry_rejected'
+        result['settling_time'] = None
+    save_trial(output/'trial_00000', result, trace)
+    valid = (gate['socket_probes']['passed'] and result['status'] != 'invalid'
+             and (gate['passed'] or target_infeasible))
+    summary = {'status': result['status'], 'invalid_reason': result['invalid_reason'],
+               'valid': valid, 'geometry_feasible': gate['passed'],
+               'collision_probes_passed': gate['socket_probes']['passed'],
+               'target_infeasible': target_infeasible, 'peg_bottoming_m': bottoming,
+               'provisional_mass': mass_grams is None, 'geometry_hash': bundle['asset_hash'],
+               'max_penetration': result['max_penetration'],
+               'final': result['final'], 'settling_time': result['settling_time']}
+    write_json(output/'summary.json', summary)
+    progress(f"Drop: {result['status']}; gap {result['final']['max_seating_gap']*1000:.3f} mm")
     return summary
-
-
-def rank_downloads(directories):
-    rows = []
-    keys = set()
-    for directory in directories:
-        summary = read_json(Path(directory)/'summary.json')
-        keys.add(summary['comparison_key'])
-        rows.append({'directory': str(directory), **summary})
-    if len(keys) != 1:
-        raise ValueError('Runs use different releases, physics or preparation settings; rerun with the same profile/seed/count')
-    eligible = [r for r in rows if r['eligible_for_ranking']]
-    eligible.sort(key=lambda r: (-r['objective_value'], r['mean_success_settling_time'] if r['mean_success_settling_time'] is not None else float('inf')))
-    return {'ranking': eligible, 'excluded': [r for r in rows if not r['eligible_for_ranking']]}

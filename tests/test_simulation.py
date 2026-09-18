@@ -4,8 +4,7 @@ import mujoco
 import numpy as np
 import pytest
 
-from aerial_assembly.config import Envelope, Physics, Release, TrialSettings
-from aerial_assembly.experiments import summarize, wilson
+from aerial_assembly.config import Physics, Release, TrialSettings
 from aerial_assembly.model import build_model, initial_state, set_state
 from aerial_assembly.simulation import classify, pose_metrics, run_drop
 
@@ -79,17 +78,6 @@ def test_quaternion_sign_does_not_change_score(bundle):
     assert a == b
 
 
-def test_randomization_and_statistics():
-    assert Envelope().sample(10,42) == Envelope().sample(10,42)
-    assert Envelope().sample(10,42) != Envelope().sample(10,43)
-    low, high = wilson(0,100)
-    assert low == pytest.approx(0,abs=1e-15) and .03 < high < .04
-    s = summarize([{'status':'invalid','settling_time':None}, {'status':'success','settling_time':.2}])
-    assert s['success_fraction_among_valid'] == 1
-    assert s['invalid_fraction'] == .5
-    assert not s['eligible_for_ranking']
-
-
 def test_invalid_settings_rejected():
     with pytest.raises(ValueError):
         Physics(timestep=.01)
@@ -97,5 +85,3 @@ def test_invalid_settings_rejected():
         TrialSettings(duration=.1,dwell=.5)
     with pytest.raises(ValueError):
         Release(height=-1)
-    with pytest.raises(ValueError):
-        Envelope(offset=(-1,0)).sample(1,42)
