@@ -105,7 +105,30 @@ def classify(final, held_for, bundle, settings, invalid_reason=None, touched_flo
     return 'stationary_misalignment', None
 
 
-def run_drop(model, bundle, initial, settings=TrialSettings(), record=True, progress=None):
+def reference_metrics(metrics, pos, quat, bundle, reference):
+    """Compare COM and orientation to a user-accepted, saved assembly pose."""
+    com = bundle['inertial']['com']
+    R, ref_R = rotation(quat), rotation(reference['qpos'][3:])
+    delta = np.asarray(pos) + R.apply(com) - (np.asarray(reference['qpos'][:3]) + ref_R.apply(com))
+    return {**metrics, 'reference_translation_error': float(np.linalg.norm(delta)),
+            'reference_angle_error': float((ref_R.inv()*R).magnitude()),
+            'reference_depth_error': float(np.max(np.abs(
+                np.asarray(metrics['insertion_depths']) - reference['final']['insertion_depths'])))}
+
+
+def meets_reference(metrics, bundle, settings, reference):
+    return (metrics['reference_translation_error'] <= settings.translation_tolerance and
+            metrics['reference_angle_error'] <= settings.angle_tolerance and
+            metrics['reference_depth_error'] <= settings.insertion_tolerance and
+            metrics['max_seating_gap'] <= reference['final']['max_seating_gap'] + settings.gap_tolerance and
+            metrics['linear_speed'] <= settings.linear_speed_tolerance and
+            metrics['angular_speed'] <= settings.angular_speed_tolerance and
+            metrics['support_force_z'] >= bundle['inertial']['mass']*9.81*.05 and
+            metrics['penetration'] <= bundle['max_penetration'] and not metrics['floor_contact'])
+
+
+def run_drop(model, bundle, initial, settings=TrialSettings(), record=True, progress=None,
+             reference=None):
     from .model import set_state
     data = set_state(model, initial)
     dt = float(model.opt.timestep)
@@ -113,6 +136,8 @@ def run_drop(model, bundle, initial, settings=TrialSettings(), record=True, prog
     if not math.isclose(steps*dt, settings.duration, abs_tol=1e-10):
         raise ValueError('Duration must be an integer multiple of timestep')
     final = measure(model, data, bundle)
+    if reference is not None:
+        final = reference_metrics(final, data.qpos[:3], data.qpos[3:], bundle, reference)
     invalid = 'intersecting_initial_state' if max(final['penetration'], final['floor_penetration']) > 1e-8 else None
     held_since = None
     max_penetration = final['penetration']
@@ -132,9 +157,13 @@ def run_drop(model, bundle, initial, settings=TrialSettings(), record=True, prog
         # mj_step integrates after contact evaluation: synchronize all diagnostics.
         mujoco.mj_forward(model, data)
         final = measure(model, data, bundle)
+        if reference is not None:
+            final = reference_metrics(final, data.qpos[:3], data.qpos[3:], bundle, reference)
         max_penetration = max(max_penetration, final['penetration'])
         touched_floor |= final['floor_contact']
-        if meets_target(final, bundle, settings):
+        accepted = (meets_target(final, bundle, settings) if reference is None else
+                    meets_reference(final, bundle, settings, reference))
+        if accepted:
             if held_since is None:
                 held_since = float(data.time)
         else:
@@ -150,7 +179,13 @@ def run_drop(model, bundle, initial, settings=TrialSettings(), record=True, prog
         invalid = 'solver_warning_or_nonfinite_state'
     held_for = 0.0 if held_since is None else float(data.time)-held_since
     status, reason = classify(final, held_for, bundle, settings, invalid, touched_floor)
+    if reference is not None and status not in ('success', 'invalid', 'missed_receiver'):
+        moving = (final['linear_speed'] > settings.linear_speed_tolerance or
+                  final['angular_speed'] > settings.angular_speed_tolerance)
+        status = ('unsettled_timeout' if moving or meets_reference(final, bundle, settings, reference)
+                  else 'reference_mismatch')
     result = {'schema_version': 1, 'status': status, 'invalid_reason': reason,
+              'success_mode': 'flush' if reference is None else 'reference',
               'asset_hash': bundle['asset_hash'], 'geometry_source': bundle['source'],
               'initial_state': initial, 'settings': asdict(settings),
               'physics': {'timestep': dt, 'friction': float(model.geom_friction[-1,0]),

@@ -64,13 +64,16 @@ def build_model(bundle, physics=Physics()):
     return mujoco.MjModel.from_xml_string(xml), xml
 
 
-def initial_state(bundle, release=Release()):
+def initial_state(bundle, release=Release(), *, pivot=None, points=None):
     target_R = rotation(bundle['target']['quat'])
-    # Extrinsic xyz Euler perturbation in world coordinates, about upper COM.
+    # Extrinsic xyz Euler perturbation in world coordinates, about the chosen pivot.
     R = Rotation.from_euler('xyz', release.rpy_deg, degrees=True) * target_R
     com = np.asarray(bundle['inertial']['com'])
-    pos = np.asarray(bundle['target']['pos']) + target_R.apply(com) - R.apply(com)
-    points = bounds_points(bundle)
+    pivot = com if pivot is None else np.asarray(pivot, dtype=float)
+    if pivot.shape != (3,) or not np.isfinite(pivot).all():
+        raise ValueError('Rotation pivot must be a finite local 3-vector')
+    pos = np.asarray(bundle['target']['pos']) + target_R.apply(pivot) - R.apply(pivot)
+    points = bounds_points(bundle) if points is None else points
     # Conservative, reproducible height definition: block AABBs fully separated.
     lift = max(0.0, float(points[:,2].max() - (R.apply(points)+pos)[:,2].min()))
     pos += [release.offset[0], release.offset[1], lift + release.height]
@@ -78,7 +81,8 @@ def initial_state(bundle, release=Release()):
     origin_v = np.asarray(release.velocity) - np.cross(omega_world, R.apply(com))
     return {'qpos': [*pos.tolist(), *quaternion(R)],
             'qvel': [*origin_v.tolist(), *R.inv().apply(omega_world).tolist()],
-            'release': asdict(release), 'clearance_lift': lift}
+            'release': asdict(release), 'clearance_lift': lift,
+            'rotation_pivot_local': pivot.tolist()}
 
 
 def set_state(model, state):

@@ -56,6 +56,19 @@ def parser():
     cad.add_argument('--mass-grams', type=float, help='Measured complete block mass; assumes uniform distribution')
     cad.add_argument('--cache', default='assets/cad-cache')
     cad.add_argument('--video', action='store_true', help='Also render an MP4')
+    grid = sub.add_parser('cad-grid', help='Search a discrete six-dimensional drop grid')
+    grid.add_argument('directory', help='Local export containing robot.xml and assets')
+    grid.add_argument('--config', required=True)
+    grid.add_argument('--out', required=True)
+    grid.add_argument('--density', type=float, default=600.)
+    grid.add_argument('--mass-grams', type=float)
+    grid.add_argument('--cache', default='assets/cad-cache')
+    grid.add_argument('--dry-run', action='store_true', help='Count states without preparing CAD or simulating')
+    grid.add_argument('--resume', action='store_true')
+    grid.add_argument('--max-states', type=int, help='Maximum additional states this invocation')
+    grid.add_argument('--record-successes', action='store_true')
+    grid.add_argument('--record-trial', type=int, action='append', default=[], help='Save this grid index for replay; repeatable')
+    grid.add_argument('--progress-every', type=int, default=10)
     render = sub.add_parser('render', help='Render an existing recorded drop to MP4')
     render.add_argument('directory')
     render.add_argument('--out', required=True)
@@ -70,6 +83,20 @@ def parser():
 def main(argv=None):
     args = parser().parse_args(argv)
     try:
+        if args.command == 'cad-grid':
+            from .grid import cad_grid, configuration as grid_configuration
+            if args.dry_run:
+                grid, _, _, _, _ = grid_configuration(args.config)
+                print(json.dumps(grid.describe(), indent=2))
+                return 0
+            result = cad_grid(args.directory, args.out, config=args.config,
+                              density=args.density, mass_grams=args.mass_grams, cache=args.cache,
+                              resume=args.resume, max_states=args.max_states,
+                              record_successes=args.record_successes, record_trials=args.record_trial,
+                              progress_every=args.progress_every,
+                              progress=lambda message: print(message, flush=True))
+            print(json.dumps(result, indent=2))
+            return 2 if result['invalid_states'] else 0
         if args.command == 'replay':
             replay(args.directory, args.trial, args.collisions)
             return 0
@@ -87,6 +114,9 @@ def main(argv=None):
             render_video(args.out, Path(args.out)/'drop.mp4')
         print(json.dumps(result, indent=2))
         return 0 if result['valid'] else 2
+    except KeyboardInterrupt:
+        print('Interrupted. Completed grid states are checkpointed; use --resume.', file=sys.stderr)
+        return 130
     except (ValueError, TypeError, KeyError, OSError, RuntimeError) as e:
         print(f'Error: {e}', file=sys.stderr)
         return 2

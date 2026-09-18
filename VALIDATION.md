@@ -61,6 +61,32 @@ approximately 22.667 mm insertion. Final COM speed was 0.0057 mm/s. The mass
 remains provisional at 12.982 g with uniform effective density 600 kg/m³.
 This is an initial-settling preview, not a full one-second or convergence study.
 
+## Grid-search verification
+
+All 54 available tests passed across focused invocations, including the MK2
+integration check; four original-export tests were excluded because their assets
+are absent. The two reference tests also passed after the final scoring update.
+
+The grid extension is covered by 10 tests for decimal inclusive ranges, six-axis
+indexing, profile-center rotation and clearance, SI conversion, interruption and
+resume, partial checkpoint recovery, output protection, outcome counts, geometry
+gates, reference loading, reference dwell, and invalid-result precedence. Synthetic
+grid tests exercise the real simulation and confirm one success and one miss in
+a two-state grid. The existing CLI, physics (including deterministic trajectories
+and timestep refinement), geometry, and MK2 integration checks are retained.
+
+The saved MK2 preview's final pose passes the reference scorer's pose, stability,
+support, and penetration thresholds. Replaying its 31 saved states through
+MuJoCo diagnostics produces six consecutive accepted final frames, spanning
+approximately 50 ms. This is a recorded-frame check, not a new simulation or proof
+of the 100 ms every-timestep dwell. New example grids use one-second trials and
+retain a 100 ms final dwell. No full MK2 grid or new MK2 tolerance envelope has
+been measured as part of this implementation.
+
+The full example's dry run counts 301,401 states (81 X offsets, 61 Y offsets,
+61 theta-Y angles, one Z height). See [grid-search conventions](docs/grid-search.md)
+for the accepted-reference scoring definition and the 27-state pilot.
+
 ## Historical numerical findings
 
 These observations predate the simplification and are not fresh verification

@@ -91,8 +91,10 @@ they are missing. Without the original export, use
 integration test. For synthetic tests only, use
 `python -m pytest -q -m 'not requires_export and not requires_mk2'`.
 
-The supported commands are `cad-drop`, `replay`, and `render`. API access,
-batch experiments, ranking, sweeps, demo generation, and alternate import
-commands have been removed. Configuration accepts only `physics`, `trial`,
-and `release`. Old experiment APIs and summary statistics are not supported;
-existing saved trajectories remain viewable.
+The supported commands are `cad-drop`, `cad-grid`, `replay`, and `render`.
+See [discrete grid searches](docs/grid-search.md) for six-axis ranges, the accepted
+MK2 preview scoring mode, success counts, and resumable runs. Start with
+`examples/mk2-grid-pilot.json`; the full 1 mm/degree example has 301,401 states.
+Single-drop configuration accepts `physics`, `trial`, and `release`; grid
+configuration has its own schema. Older batch/ranking/API/import commands remain
+removed; existing saved trajectories remain viewable.
