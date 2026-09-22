@@ -1,5 +1,8 @@
 # Discrete CAD drop searches
 
+Run the commands below from the repository's `simulation/` directory with its
+virtual environment activated.
+
 `cad-grid` enumerates the Cartesian product of six independent axes. Each
 range is `[minimum, maximum, step]`, includes both endpoints, and requires a
 positive step dividing the range exactly. A fixed axis uses identical endpoints.

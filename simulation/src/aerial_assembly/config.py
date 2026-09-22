@@ -35,9 +35,9 @@ def quaternion(rot):
 
 @dataclass(frozen=True)
 class Physics:
-    timestep: float = 0.0000125
+    timestep: float = 0.1
     friction: float = 0.3
-    contact_timeconst: float = 0.00005
+    contact_timeconst: float = 0.2
     contact_dampratio: float = 1.0
     iterations: int = 100
 

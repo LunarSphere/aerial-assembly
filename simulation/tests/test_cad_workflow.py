@@ -65,8 +65,9 @@ def test_profile_rejects_unknown_topology(download):
 
 
 @pytest.mark.requires_export
-def test_infeasible_target_records_one_diagnostic_drop(download, tmp_path):
+def test_infeasible_target_records_one_diagnostic_drop(download, tmp_path, refined_physics):
     report = cad_drop(download,tmp_path/'run',cache=tmp_path/'cache',
+                      physics=refined_physics,
                       settings=TrialSettings(duration=.0001,dwell=.00005))
     assert report['target_infeasible']
     assert report['valid']

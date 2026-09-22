@@ -6,7 +6,7 @@
 
 ## Build, Test, and Development Commands
 
-Use Python 3.11+ from the repository root:
+Use Python 3.11+ from the `simulation/` directory (all paths in this guide are relative to it):
 
 ```bash
 python3 -m venv .venv

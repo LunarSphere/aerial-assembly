@@ -1,7 +1,7 @@
 {
   "physics": {
-    "timestep": 0.0000125,
-    "contact_timeconst": 0.00005,
+    "timestep": 0.00005,
+    "contact_timeconst": 0.0001,
     "friction": 0.3
   },
   "trial": {"duration": 0.3, "dwell": 0.1},

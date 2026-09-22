@@ -1,4 +1,5 @@
 from copy import deepcopy
+from dataclasses import asdict
 import json
 
 import pytest
@@ -39,10 +40,11 @@ def test_profile_center_rotation_and_clearance(bundle):
 
 
 @pytest.fixture
-def local_grid(bundle, monkeypatch, tmp_path):
+def local_grid(bundle, monkeypatch, tmp_path, refined_physics):
     monkeypatch.setattr(cad_workflow, 'prepare_download', lambda *a, **kw: deepcopy(bundle))
     config = tmp_path/'config.json'
     write_json(config, {'grid_search': {'dx_mm': [0, 2, 1]},
+                       'physics': asdict(refined_physics),
                        'trial': {'duration': .0001, 'dwell': .00005}})
     out = tmp_path/'grid'
     args = ['cad-grid', 'local', '--config', str(config), '--out', str(out)]
@@ -123,9 +125,10 @@ def test_reference_dwell_and_invalid_override(bundle, model, tmp_path):
     assert not meets_reference({**m, 'reference_translation_error': .01}, bundle, settings, reference)
 
 
-def test_success_count_matches_individual_simulation(local_grid, bundle):
+def test_success_count_matches_individual_simulation(local_grid, bundle, refined_physics):
     config, out, args = local_grid
     write_json(config, {'grid_search': {'dx_mm': [0, 300, 300], 'dz_mm': [10, 10, 1]},
+                       'physics': asdict(refined_physics),
                        'rotation_center': 'com', 'trial': {'duration': .3, 'dwell': .1}})
     assert cli.main(args + ['--record-successes']) == 0
     report = read_json(out/'grid_summary.json')
@@ -164,7 +167,8 @@ def test_geometry_gate_prevents_grid_scoring(local_grid, monkeypatch, probe_fail
     assert not (out/'grid_results.jsonl').exists()
 
 
-def test_reference_grid_accepts_infeasible_flush_target(local_grid, monkeypatch, bundle, model, tmp_path):
+def test_reference_grid_accepts_infeasible_flush_target(local_grid, monkeypatch, bundle, model, tmp_path,
+                                                      refined_physics):
     config, out, args = local_grid
     # A saved, settled synthetic reference exercises the complete reference-file path.
     state = {'qpos': [*bundle['target']['pos'], *bundle['target']['quat']], 'qvel': [0]*6}
@@ -173,6 +177,7 @@ def test_reference_grid_accepts_infeasible_flush_target(local_grid, monkeypatch,
     cad_workflow.save_trial(reference_dir/'trial_00000', result, trace)
     write_json(reference_dir/'summary.json', {'valid': True, 'collision_probes_passed': True})
     write_json(config, {'grid_search': {'dz_mm': [10, 10, 1]},
+                       'physics': asdict(refined_physics),
                        'trial': {'duration': .3, 'dwell': .1},
                        'success': {'mode': 'reference', 'reference_run': str(reference_dir)}})
     validate = cad_workflow.validate_geometry

@@ -6,6 +6,12 @@ import subprocess
 import sys
 
 
+def configure_render_environment(env):
+    backend = 'cgl' if sys.platform == 'darwin' else 'glfw' if sys.platform == 'win32' else 'egl'
+    env.setdefault('MUJOCO_GL', backend)
+    env.setdefault('MESA_SHADER_CACHE_DISABLE', 'true')
+
+
 def frame_camera(camera, directory, trace):
     import numpy as np
     from .config import read_json, rotation
@@ -23,8 +29,7 @@ def frame_camera(camera, directory, trace):
 
 def render_video(directory, output, trial=0):
     env = os.environ.copy()
-    env.setdefault('MUJOCO_GL', 'egl')
-    env.setdefault('MESA_SHADER_CACHE_DISABLE', 'true')
+    configure_render_environment(env)
     try:
         subprocess.run([sys.executable, '-m', 'aerial_assembly.render', str(directory),
                         '--out', str(output), '--trial', str(trial)], env=env, check=True)
@@ -38,8 +43,7 @@ def main():
     parser.add_argument('--out', required=True)
     parser.add_argument('--trial', type=int, default=0)
     args = parser.parse_args()
-    os.environ.setdefault('MUJOCO_GL', 'egl')
-    os.environ.setdefault('MESA_SHADER_CACHE_DISABLE', 'true')
+    configure_render_environment(os.environ)
     import imageio.v2 as imageio
     import mujoco
     import numpy as np

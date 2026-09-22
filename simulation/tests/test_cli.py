@@ -1,4 +1,5 @@
 from copy import deepcopy
+from dataclasses import asdict
 import subprocess
 
 import numpy as np
@@ -29,7 +30,9 @@ def test_removed_drop_options_are_rejected(flag):
 def test_configuration_uses_single_drop_defaults(tmp_path):
     path = tmp_path/'config.json'
     write_json(path, {'release': {'height': .02}})
-    _, settings, release = cli.configuration(path)
+    physics, settings, release = cli.configuration(path)
+    assert physics.timestep == .1
+    assert physics.contact_timeconst == .2
     assert settings.duration == 1.
     assert settings.dwell == .1
     assert release.height == .02
@@ -39,11 +42,12 @@ def test_configuration_uses_single_drop_defaults(tmp_path):
 
 
 @pytest.fixture
-def local_drop(bundle, monkeypatch, tmp_path):
+def local_drop(bundle, monkeypatch, tmp_path, refined_physics):
     # Exercise real simulation/output orchestration with synthetic test geometry.
     monkeypatch.setattr(cad_workflow, 'prepare_download', lambda *a, **kw: deepcopy(bundle))
     config = tmp_path/'config.json'
-    write_json(config, {'trial': {'duration': .0001, 'dwell': .00005}})
+    write_json(config, {'physics': asdict(refined_physics),
+                       'trial': {'duration': .0001, 'dwell': .00005}})
     output = tmp_path/'run'
     args = ['cad-drop', 'local-export', '--config', str(config), '--out', str(output)]
     return args, output

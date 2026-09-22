@@ -1,5 +1,8 @@
 # Local export → drop → inspect
 
+Run the commands below from the repository's `simulation/` directory with its
+virtual environment activated.
+
 ## Prepare the input
 
 Use a local export directory containing `robot.xml` and every referenced asset.

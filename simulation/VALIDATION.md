@@ -2,6 +2,20 @@
 
 ## Current verification
 
+The single-drop example now explicitly uses the faster settings measured in
+[MK2 timestep tuning](#mk2-timestep-tuning); the package defaults described next
+are separate from that example.
+
+The default timestep is now 0.1 seconds with a 0.2-second contact time constant
+for faster, coarse previews. Historical seating and convergence evidence below
+applies to the previous fine settings, which the accuracy tests now specify
+explicitly (0.0000125-second timestep, 0.00005-second contact time constant).
+Passing those tests does not validate collision accuracy at the new defaults.
+The aligned synthetic 0.3-second drop at 0.1 seconds per step reported about
+15.5 mm peak penetration; halving the step to 0.05 seconds (keeping the contact
+time constant at 0.2 seconds) still reported 12 mm. Both runs were correctly
+classified as `invalid` / `excessive_penetration`.
+
 The retained automated checks cover gravity, deterministic trajectories,
 release frame conversion, seating and final dwell, timestep refinement,
 invalid starts, quaternion sign invariance, socket material checks, convex
@@ -29,6 +43,50 @@ After restoring the original assets, run the complete suite and a one-second
 seating gap, penetration, and trajectory against the original implementation
 under the same dependency versions and settings. Check replay/video separately
 on a supported graphics environment.
+
+## MK2 timestep tuning
+
+On 2026-09-18, five settings were measured against the same MK2 collision
+geometry (`881dcc89f250` asset-hash prefix), with a 10 mm aligned release from
+rest, 0.3-second duration, friction 0.3, damping ratio 1, and 100 solver
+iterations. Trials are deterministic (no random sampling). The existing
+`runs/drop3` was read for comparison and was not modified or rerun.
+
+| Timestep (s) | Contact time constant (s) | Simulation wall time (s) | Peak penetration (mm) | Numerical result |
+| --- | --- | --- | --- | --- |
+| 0.001 | 0.002 | 6.6 | 0.938 | Invalid |
+| 0.0002 | 0.0004 | 37.0 | 0.220 | Invalid |
+| 0.0001 | 0.0002 | 65.7 | 0.527 | Invalid |
+| 0.0001 | 0.0004 | 64.7 | 0.527 | Invalid |
+| **0.00005** | **0.0001** | **122.8** | **0.0107** | **Valid** |
+
+Timings measure `run_drop` on this Mac, excluding model compilation (about
+2.1–2.3 seconds per candidate), geometry preparation/validation, and rendering.
+They are individual measurements, not statistical speed benchmarks. All five
+kept the upper block off the catch floor and produced no solver warnings, but
+the four larger-step candidates exceeded the unchanged 0.05 mm penetration
+limit. Trial configurations, trajectories, results, and timing summaries are
+saved under `runs/timestep-tuning/` (Git-ignored).
+
+The selected example setting uses 6,000 steps instead of `drop3`'s 24,000.
+At 0.3 seconds, the block had a 2.687 mm seating gap, 0.0000073 m/s linear
+speed, and 0.1266 N upward support against its 0.1274 N weight. Its
+`stationary_misalignment` classification is expected for this bottoming CAD;
+the geometry warning remains. No scoring thresholds or collision geometry
+were relaxed.
+
+A second run through the normal `cad-drop goat_mk2 --config
+examples/cad-experiment.json` command reproduced the complete result JSON and
+recorded trajectory exactly, returned exit code 0 and `valid: true`, and is
+saved as `runs/timestep-tuning/selected`. This checks repeatability and the
+normal CAD preparation/validation path as well as the benchmark path.
+
+The saved finer `drop3` used a 0.0000125-second step and 0.00005-second contact
+time constant. It had 0.0136 mm peak penetration and a 2.998 mm final gap.
+Both support the block, but their resting poses differ: these measurements
+establish usable aligned-drop behavior, not timestep convergence or validated
+performance for offset/tilted releases. In particular, the non-monotonic
+penetration results rule out assuming every intermediate timestep is safe.
 
 ## Single-piece GOAT Mk2
 
@@ -98,7 +156,7 @@ of the incomplete export in this checkout.
 Synthetic fixture:
 - The original 250 µs timestep and 5 ms contact time constant allowed roughly
   2 mm of receiver penetration.
-- The retained defaults are a 12.5 µs timestep and 50 µs contact time constant.
+- The previous defaults were a 12.5 µs timestep and 50 µs contact time constant.
   A three-second aligned run seated with about 20.28 µm peak penetration.
 - A 1 mm offset disagreed at 25 versus 12.5 µs; 12.5 versus 6.25 µs both seated.
   A coarse run alone is insufficient evidence of numerical convergence.

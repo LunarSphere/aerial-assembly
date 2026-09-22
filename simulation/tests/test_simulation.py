@@ -31,7 +31,7 @@ def test_release_rotation_preserves_com_and_velocity(bundle):
     assert np.allclose(np.asarray(b['qvel'][:3])+np.cross([.3,.1,.2],com), [.1,.2,.3])
 
 
-def test_aligned_repeatable_and_half_timestep(bundle, model):
+def test_aligned_repeatable_and_half_timestep(bundle, model, refined_physics):
     settings = TrialSettings(duration=.3, dwell=.1)
     state = initial_state(bundle)
     a, trace_a = run_drop(model, bundle, state, settings)
@@ -40,7 +40,7 @@ def test_aligned_repeatable_and_half_timestep(bundle, model):
     assert a == b
     assert np.array_equal(trace_a, trace_b)
     assert not np.array_equal(trace_a[0], trace_a[-1])
-    refined = build_model(bundle, replace(Physics(), timestep=Physics().timestep/2))[0]
+    refined = build_model(bundle, replace(refined_physics, timestep=refined_physics.timestep/2))[0]
     c, _ = run_drop(refined, bundle, state, settings, record=False)
     assert c['status'] == a['status']
     assert c['final']['max_seating_gap'] < settings.gap_tolerance
@@ -51,6 +51,24 @@ def test_target_stays_seated(bundle, model):
     state = {'qpos': [*bundle['target']['pos'], *bundle['target']['quat']], 'qvel': [0]*6}
     r, _ = run_drop(model, bundle, state, TrialSettings(duration=.15, dwell=.1), record=False)
     assert r['status'] == 'success'
+
+
+@pytest.mark.parametrize('dt', [.1, .05])
+def test_coarse_drop_repeatable_and_reports_penetration(bundle, dt):
+    model = build_model(bundle, replace(Physics(), timestep=dt))[0]
+    state = initial_state(bundle)
+    settings = TrialSettings(duration=.3, dwell=.1)
+    a, trace_a = run_drop(model, bundle, state, settings)
+    b, trace_b = run_drop(model, bundle, state, settings)
+    assert a == b
+    assert np.array_equal(trace_a, trace_b)
+    assert len(trace_a) == round(settings.duration/dt) + 1
+    assert a['elapsed_simulation_time'] == pytest.approx(.3)
+    assert a['physics']['timestep'] == dt
+    # Even halving this coarse step does not recover accurate contact behavior.
+    assert a['max_penetration'] > bundle['max_penetration']
+    assert a['status'] == 'invalid'
+    assert a['invalid_reason'] == 'excessive_penetration'
 
 
 def test_miss_and_intersecting_initial_state(bundle, model):
@@ -80,7 +98,7 @@ def test_quaternion_sign_does_not_change_score(bundle):
 
 def test_invalid_settings_rejected():
     with pytest.raises(ValueError):
-        Physics(timestep=.01)
+        Physics(timestep=.1, contact_timeconst=.00005)
     with pytest.raises(ValueError):
         TrialSettings(duration=.1,dwell=.5)
     with pytest.raises(ValueError):
