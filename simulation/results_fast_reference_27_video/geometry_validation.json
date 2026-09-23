@@ -1,0 +1,27 @@
+{
+  "passed": false,
+  "target": {
+    "translation_error": 0.0,
+    "angle_error": 0.0,
+    "max_seating_gap": 0.0,
+    "insertion_depths": [
+      0.025333332595733157,
+      0.0253333337857949
+    ],
+    "max_depth_error": 7.128356932506463e-11,
+    "legs_inside": false,
+    "penetration": 0.001822716726354507,
+    "floor_penetration": 0.0,
+    "support_force_z": 0.0,
+    "floor_contact": false
+  },
+  "socket_probes": {
+    "passed": true,
+    "queries": 132,
+    "failures": []
+  },
+  "insertion_path_max_penetration": 0.0020974889447616988,
+  "worst_path_fraction": 0.9875,
+  "path_samples": 81,
+  "limitation": "Discrete aligned path check; does not certify all surface errors or tilted insertion."
+}

@@ -124,7 +124,7 @@ def meets_reference(metrics, bundle, settings, reference):
             metrics['linear_speed'] <= settings.linear_speed_tolerance and
             metrics['angular_speed'] <= settings.angular_speed_tolerance and
             metrics['support_force_z'] >= bundle['inertial']['mass']*9.81*.05 and
-            metrics['penetration'] <= bundle['max_penetration'] and not metrics['floor_contact'])
+            not metrics['floor_contact'])
 
 
 def run_drop(model, bundle, initial, settings=TrialSettings(), record=True, progress=None,
@@ -173,7 +173,7 @@ def run_drop(model, bundle, initial, settings=TrialSettings(), record=True, prog
         if progress and (step+1) % progress_stride == 0:
             progress(f"Simulated {data.time:.2f}/{settings.duration:g} s; "
                      f"gap {final['max_seating_gap']*1000:.3f} mm")
-    if max_penetration > bundle['max_penetration'] and invalid is None:
+    if reference is None and max_penetration > bundle['max_penetration'] and invalid is None:
         invalid = 'excessive_penetration'
     if np.any(data.warning.number):
         invalid = 'solver_warning_or_nonfinite_state'

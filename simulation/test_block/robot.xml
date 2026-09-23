@@ -2,7 +2,12 @@
 <!-- Generated using onshape-to-robot -->
 <!-- Onshape https://cad.onshape.com/documents/9aedd902d9f4dee95f6f5669/w/7949dab0ca2a5f2bbdbe781f/e/c3f00052bf61614c03dc045b -->
 <mujoco model="goat_mk2">
-  <compiler angle="radian" meshdir="assets" autolimits="true"/>
+  <compiler
+    angle="radian"
+    meshdir="assets"
+    autolimits="true"
+    inertiafromgeom="true"
+    inertiagrouprange="3 3"/>
   <default>
     <default class="goat_mk2">
       <joint frictionloss="0.1" armature="0.005"/>
@@ -19,10 +24,16 @@
     <!-- Link part_1 -->
     <body name="part_1" pos="0 0 0" quat="1 0 0 0" childclass="goat_mk2">
       <freejoint name="part_1_freejoint"/>
-      <inertial pos="0 0 0" mass="1e-09" fullinertia="1e-09 1e-09 1e-09 0 0 0"/>
       <!-- Part part_1 -->
       <geom type="mesh" class="visual" pos="-0.0360284 2.18e-10 -0.0384847" quat="1 0 0 0" mesh="part_1" material="part_1_material"/>
-      <geom type="mesh" class="collision" pos="-0.0360284 2.18e-10 -0.0384847" quat="1 0 0 0" mesh="part_1" material="part_1_material"/>
+      <geom type="mesh"
+      class="collision"
+      pos="-0.0360284 2.18e-10 -0.0384847"
+      quat="1 0 0 0"
+      mesh="part_1"
+      material="part_1_material"
+      density="1240"
+      friction="0.8 0.005 0.0001"/>
     </body>
   </worldbody>
   <asset>

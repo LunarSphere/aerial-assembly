@@ -1,0 +1,44 @@
+{
+  "total_states": 27,
+  "completed_states": 27,
+  "remaining_states": 0,
+  "complete": true,
+  "successful_states": 1,
+  "invalid_states": 0,
+  "status_counts": {
+    "unsettled_timeout": 26,
+    "success": 1
+  },
+  "success_fraction_completed": 0.037037037037037035,
+  "success_fraction_total": 0.037037037037037035,
+  "successful_bounds": {
+    "dx_mm": [
+      0.0,
+      0.0
+    ],
+    "dy_mm": [
+      0.0,
+      0.0
+    ],
+    "dz_mm": [
+      10.0,
+      10.0
+    ],
+    "theta_x_deg": [
+      0.0,
+      0.0
+    ],
+    "theta_y_deg": [
+      0.0,
+      0.0
+    ],
+    "theta_z_deg": [
+      0.0,
+      0.0
+    ]
+  },
+  "wall_seconds": 53.04229177099296,
+  "estimated_remaining_seconds": 0.0,
+  "success_mode": "reference",
+  "geometry_feasible": false
+}

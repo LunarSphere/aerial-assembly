@@ -1,0 +1,23 @@
+{
+  "physics": {
+    "timestep": 0.002,
+    "contact_timeconst": 0.005,
+    "friction": 0.3
+  },
+  "grid_search": {
+    "dx_mm": [0, 0, 1],
+    "dy_mm": [0, 0, 1],
+    "dz_mm": [10, 10, 1],
+    "theta_x_deg": [0, 0, 1],
+    "theta_y_deg": [0, 0, 1],
+    "theta_z_deg": [0, 0, 1]
+  },
+  "rotation_center": "bounds_center",
+  "success": {"mode": "reference", "reference_run": "runs/drop-fast3"},
+  "trial": {
+    "duration": 0.3,
+    "dwell": 0.1,
+    "linear_speed_tolerance": 0.005,
+    "angular_speed_tolerance": 0.05
+  }
+}

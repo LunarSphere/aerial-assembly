@@ -1,0 +1,9 @@
+{
+  "physics": {
+    "timestep": 0.00005,
+    "contact_timeconst": 0.0001,
+    "friction": 0.3
+  },
+  "trial": {"duration": 1.0, "dwell": 0.1},
+  "release": {"height": 0.01}
+}

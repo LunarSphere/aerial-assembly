@@ -3,5 +3,6 @@
     "robot_name": "goat_mk2",
     "output_format": "mujoco",
     "merge_stls": false,
-    "simplify_stls": false
+    "simplify_stls": false,
+    "max_stl_size": 1
 }

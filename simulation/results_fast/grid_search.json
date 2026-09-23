@@ -1,0 +1,98 @@
+{
+  "axes": {
+    "dx_mm": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "dy_mm": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "dz_mm": [
+      10.0,
+      10.0,
+      1.0
+    ],
+    "theta_x_deg": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "theta_y_deg": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "theta_z_deg": [
+      0.0,
+      0.0,
+      1.0
+    ]
+  },
+  "axis_order": [
+    "dx_mm",
+    "dy_mm",
+    "dz_mm",
+    "theta_x_deg",
+    "theta_y_deg",
+    "theta_z_deg"
+  ],
+  "counts": {
+    "dx_mm": 1,
+    "dy_mm": 1,
+    "dz_mm": 1,
+    "theta_x_deg": 1,
+    "theta_y_deg": 1,
+    "theta_z_deg": 1
+  },
+  "total_states": 1,
+  "physics": {
+    "timestep": 0.002,
+    "friction": 0.3,
+    "contact_timeconst": 0.005,
+    "contact_dampratio": 1.0,
+    "iterations": 100
+  },
+  "trial": {
+    "duration": 0.3,
+    "dwell": 0.1,
+    "translation_tolerance": 0.0005,
+    "angle_tolerance": 0.017453292519943295,
+    "gap_tolerance": 0.0001,
+    "linear_speed_tolerance": 0.001,
+    "angular_speed_tolerance": 0.017453292519943295,
+    "insertion_tolerance": 0.0005,
+    "log_interval": 0.01
+  },
+  "rotation_center": "bounds_center",
+  "success": {
+    "mode": "flush"
+  },
+  "reference": null,
+  "geometry_hash": "06a8a47a20be12028c0217aed1df340d502ae069fde9b225a9e0aa95f5423b90",
+  "schema_version": 1,
+  "versions": {
+    "python": "3.14.4",
+    "mujoco": "3.13.0",
+    "numpy": "2.5.3",
+    "scipy": "1.18.1",
+    "trimesh": "4.12.2",
+    "tetgen": "0.8.4"
+  },
+  "code_hashes": {
+    "cad_collision.py": "6e603c01eb3369c58155150d264e730f0f6c742e02d49d04e88d5242a5de6622",
+    "cli.py": "1611dddb938c711c977cc0649ba93fbbc5de666f3de3ab1b6d72197259071f05",
+    "grid.py": "944b980bbcca562de5c172ea4e86d7f11e5a9e05d69a8a488c1003bbb8987f37",
+    "render.py": "65ede6ab2f1fa20fd26aec2ad3d63390be990ae2d7e27b66f07270bf57420685",
+    "config.py": "2a564677a7c75352c709b13a0394ab4675be1656237c91ede068a14f6d3458e2",
+    "model.py": "d69b3d821076ad737333a97f6bf35b147f2205ceb240b8544b918e48b7d2d425",
+    "cad_workflow.py": "ae2ccf081e993d5bf22088a4d78785c254acef529781a1be50b4c80321ed51e6",
+    "simulation.py": "80e3cac09ddda3ae5dcd0ac4dc23f07e04cc80c5138f665e7a059b4ec7ac4c28",
+    "mjcf.py": "eb6d9563cf1c846b5c9c286426f0397e0c9906ff35a3a38a60d6f57257db522d",
+    "cad_single.py": "7d3a437521a686c4fd2955f7b0df7c21a1876913838ed0d2781e08d95439dc70",
+    "geometry.py": "d3df62daf984beed4c13f62be92f80d4651add54744c2953f133b2e33e8bf81d",
+    "__init__.py": "dba02838a4f5b6d08db2f60efd1e5b2b72ff67afec0bfa27801f34d9ffd47073"
+  }
+}

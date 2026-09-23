@@ -98,6 +98,57 @@ Choose a new MP4 filename if the requested video already exists.
 
 ## 3. Run the grid-search experiment
 
+### Current fast 27-state stack review
+
+For future `test_block` testing, use
+[`examples/cad-experiment-grid-fast-reference-27.json`](examples/cad-experiment-grid-fast-reference-27.json).
+This is the project-standard fast workflow: 27 release states, a 0.3-second
+trial, timestep `0.002`, contact time constant `0.005`, and reference/stack
+scoring. The reference accepts the supplied block's intentional incomplete
+seating; final drop videos are reviewed by a human.
+
+The 27 states are the Cartesian product of these values:
+
+| Axis | Values |
+| --- | --- |
+| X offset | −5, 0, +5 mm |
+| Y offset | −5, 0, +5 mm |
+| Z clearance | Fixed at 10 mm |
+| Theta-Y (side-profile tilt) | −5, 0, +5 degrees |
+| Theta-X / Theta-Z | Fixed at 0 degrees |
+
+Check the count without running the search:
+
+```bash
+.venv/bin/aerial cad-grid test_block \
+  --config examples/cad-experiment-grid-fast-reference-27.json \
+  --out results_fast_reference_27 --dry-run
+```
+
+Run all 27 states and save the first and last trajectories for video review:
+
+```bash
+time .venv/bin/aerial cad-grid test_block \
+  --config examples/cad-experiment-grid-fast-reference-27.json \
+  --out results_fast_reference_27_video \
+  --record-trial 0 --record-trial 26 --progress-every 5
+```
+
+Render the saved endpoint videos after the search finishes:
+
+```bash
+.venv/bin/aerial render results_fast_reference_27_video \
+  --trial 0 --out results_fast_reference_27_video/first.mp4
+.venv/bin/aerial render results_fast_reference_27_video \
+  --trial 26 --out results_fast_reference_27_video/last.mp4
+```
+
+Trial 0 is the `(-5 mm, -5 mm, -5°)` corner of the X/Y/theta-Y search;
+trial 26 is the `(+5 mm, +5 mm, +5°)` corner. To retain additional videos,
+add more `--record-trial INDEX` options before starting the search. Grid runs
+do not render videos automatically, and completed states cannot be recorded
+retroactively.
+
 The experiment config is
 [`examples/mk2-grid-search.json`](examples/mk2-grid-search.json). It controls
 X/Y offsets, vertical clearance, and three rotation angles. Each axis is
