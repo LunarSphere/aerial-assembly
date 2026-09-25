@@ -56,6 +56,15 @@ def parser():
     cad.add_argument('--mass-grams', type=float, help='Measured complete block mass; assumes uniform distribution')
     cad.add_argument('--cache', default='assets/cad-cache')
     cad.add_argument('--video', action='store_true', help='Also render an MP4')
+    chain = sub.add_parser('cad-chain', help='Add blocks until a stepping block touches the floor')
+    chain.add_argument('complement', help='Local complement export containing robot.xml and mesh assets')
+    chain.add_argument('stepper', help='Local two-peg block export containing robot.xml and mesh assets')
+    chain.add_argument('--config', help='JSON with physics, settle_seconds, and insertion_margin')
+    chain.add_argument('--out', required=True, help='New output directory')
+    chain.add_argument('--max-blocks', type=int, default=20)
+    chain.add_argument('--base-mass-grams', type=float, default=480.)
+    chain.add_argument('--block-mass-grams', type=float, default=26.)
+    chain.add_argument('--cache', default='assets/cad-cache')
     grid = sub.add_parser('cad-grid', help='Search a discrete six-dimensional drop grid')
     grid.add_argument('directory', help='Local export containing robot.xml and its mesh assets')
     grid.add_argument('--config', required=True)
@@ -73,6 +82,10 @@ def parser():
     render.add_argument('directory')
     render.add_argument('--out', required=True)
     render.add_argument('--trial', type=int, default=0, help='Trial index for older recordings')
+    chain_render = sub.add_parser('render-chain', help='Render a recorded incremental-chain stage to MP4')
+    chain_render.add_argument('directory')
+    chain_render.add_argument('--out', required=True)
+    chain_render.add_argument('--stage', type=int, help='Stage number; default is the last recorded stage')
     view = sub.add_parser('replay', help='View a recorded drop interactively')
     view.add_argument('directory')
     view.add_argument('--trial', type=int, default=0, help='Trial index for older recordings')
@@ -83,6 +96,16 @@ def parser():
 def main(argv=None):
     args = parser().parse_args(argv)
     try:
+        if args.command == 'cad-chain':
+            from .chain import cad_chain
+            result = cad_chain(args.complement, args.stepper, args.out,
+                               max_blocks=args.max_blocks,
+                               base_mass_grams=args.base_mass_grams,
+                               block_mass_grams=args.block_mass_grams,
+                               config=args.config, cache=args.cache,
+                               progress=lambda message: print(message, flush=True))
+            print(json.dumps(result, indent=2))
+            return 0
         if args.command == 'cad-grid':
             from .grid import cad_grid, configuration as grid_configuration
             if args.dry_run:
@@ -103,6 +126,10 @@ def main(argv=None):
         if args.command == 'render':
             from .render import render_video
             render_video(args.directory, args.out, args.trial)
+            return 0
+        if args.command == 'render-chain':
+            from .render import render_chain_video
+            render_chain_video(args.directory, args.out, args.stage)
             return 0
         from .cad_workflow import cad_drop
         physics, settings, release = configuration(args.config)

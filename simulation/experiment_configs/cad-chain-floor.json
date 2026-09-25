@@ -1,0 +1,10 @@
+{
+  "physics": {
+    "timestep": 0.002,
+    "contact_timeconst": 0.005,
+    "friction": 0.3,
+    "iterations": 100
+  },
+  "settle_seconds": 1.0,
+  "insertion_margin": 0.0005
+}

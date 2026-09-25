@@ -32,6 +32,46 @@ constant `0.005` s. The package defaults are `0.1` s and `0.2` s. Contact time
 constants must be at least twice the timestep so MuJoCo's `refsafe` clamp does
 not silently change the requested value.
 
+## Incremental floor-supported chain
+
+The complement export is a socket-only first block that rests on the floor.
+Add two-peg stepping blocks one at a time, keeping the assembly's simulated
+state between additions. Each ideal placement puts one peg tip inside the
+selected socket and requires the other peg to remain outside the parent's
+sockets. The runner settles each addition for one second. Peg disengagement
+alone is not collapse; the run stops when any stepping block contacts the
+floor. It compiles the requested block capacity once and keeps unused copies
+parked with gravity compensation until activation.
+
+```bash
+uv run --all-extras aerial cad-chain ../two_peg_block_complement two_peg_block \
+  --config experiment_configs/cad-chain-floor.json \
+  --out runs/chain --max-blocks 20 \
+  --base-mass-grams 480 --block-mass-grams 26
+```
+
+To model the complement as bolted to the floor, use
+`experiment_configs/cad-chain-bolted.json`. This locks all six degrees of
+freedom of the complement; the stepping blocks remain dynamic.
+
+```bash
+uv run --all-extras aerial cad-chain ../two_peg_block_complement two_peg_block \
+  --config experiment_configs/cad-chain-bolted.json \
+  --out runs/chain-bolted --max-blocks 20 \
+  --base-mass-grams 480 --block-mass-grams 26
+```
+
+to render a chain collapse
+```bash
+uv run --all-extras aerial render-chain runs/chain-bolted/ \
+    --out runs/chain-bolted/collapse.mp4
+```
+
+Each stage writes its body states and recorded trajectory to `stage_NNN.json`
+and `stage_NNN.npz`; `summary.json` reports the stable count and first failing
+addition. Placement is idealized. Results depend on the supplied geometry and
+configured contact values and are not hardware success rates.
+
 The grid configs are:
 
 - `experiment_configs/cad-experiment-grid-fast.json` — one flush-scored state.

@@ -37,11 +37,27 @@ def render_video(directory, output, trial=0):
         raise RuntimeError(f'Video rendering failed; recorded simulation is preserved in {directory}') from error
 
 
+def render_chain_video(directory, output, stage=None):
+    """Render a recorded incremental-chain stage in a separate GL process."""
+    env = os.environ.copy()
+    configure_render_environment(env)
+    command = [sys.executable, '-m', 'aerial_assembly.render', str(directory),
+               '--out', str(output), '--chain']
+    if stage is not None:
+        command.extend(['--stage', str(stage)])
+    try:
+        subprocess.run(command, env=env, check=True)
+    except subprocess.CalledProcessError as error:
+        raise RuntimeError(f'Chain video rendering failed; recorded stages remain in {directory}') from error
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('directory')
     parser.add_argument('--out', required=True)
     parser.add_argument('--trial', type=int, default=0)
+    parser.add_argument('--chain', action='store_true')
+    parser.add_argument('--stage', type=int)
     args = parser.parse_args()
     configure_render_environment(os.environ)
     import imageio.v2 as imageio
@@ -52,6 +68,59 @@ def main():
     directory, output = Path(args.directory), Path(args.out)
     if output.exists():
         raise ValueError('Video output already exists; choose a new path')
+    if args.chain:
+        stages = [args.stage] if args.stage is not None else sorted(
+            int(p.stem.split('_')[1]) for p in directory.glob('stage_*.npz'))
+        if not stages:
+            raise ValueError('No recorded chain stages found')
+        stage = stages[-1]
+        trace = np.load(directory/f'stage_{stage:03d}.npz')['trace']
+        metadata = read_json(directory/f'stage_{stage:03d}.json')
+        model = mujoco.MjModel.from_xml_path(str(directory/'scene.xml'))
+        model.vis.global_.offwidth, model.vis.global_.offheight = 960, 720
+        data = mujoco.MjData(model)
+        camera = mujoco.MjvCamera()
+        mujoco.mjv_defaultCamera(camera)
+        nactive = int(metadata['added_blocks'])+1
+        qwidth = 7*nactive
+        vwidth = 6*nactive
+        poses = trace[:, 1:1+qwidth].reshape((-1, nactive, 7))
+        centers = poses[:, :, :3].reshape((-1, 3))
+        low, high = centers.min(axis=0), centers.max(axis=0)
+        camera.lookat[:] = (low+high)/2
+        camera.distance = max(.35, float(np.linalg.norm(high-low)) + .3)
+        camera.azimuth, camera.elevation = 130, -18
+        model.vis.headlight.ambient[:] = [.4,.4,.4]
+        model.vis.headlight.diffuse[:] = [.7,.7,.7]
+        option = mujoco.MjvOption()
+        option.geomgroup[2], option.geomgroup[3] = 1, 0
+        output.parent.mkdir(parents=True, exist_ok=True)
+        fps = 30
+        duration = float(trace[-1, 0]-trace[0, 0])
+        times = np.r_[np.linspace(trace[0, 0], trace[-1, 0], max(2, int(duration*fps*2))),
+                      np.full(fps, trace[-1, 0])]
+        with mujoco.Renderer(model, height=720, width=960) as renderer:
+            with imageio.get_writer(output, fps=fps, macro_block_size=16) as writer:
+                for index, t in enumerate(times):
+                    row = trace[min(np.searchsorted(trace[:, 0], t), len(trace)-1)]
+                    data.qpos[:] = model.qpos0
+                    data.qvel[:] = 0.
+                    data.qpos[:qwidth] = row[1:1+qwidth]
+                    data.qvel[:vwidth] = row[1+qwidth:1+qwidth+vwidth]
+                    data.time = row[0]
+                    mujoco.mj_forward(model, data)
+                    renderer.update_scene(data, camera=camera, scene_option=option)
+                    frame = Image.fromarray(renderer.render())
+                    draw = ImageDraw.Draw(frame)
+                    draw.rectangle((0, 0, 960, 65), fill=(20,25,35))
+                    draw.text((16, 10), f"INCREMENTAL CHAIN | {metadata['added_blocks']} blocks | t={row[0]:.3f} s", fill='white')
+                    draw.text((16, 32), f"Stage result: {metadata['status']}", fill='white')
+                    writer.append_data(np.asarray(frame))
+                    if index == 0:
+                        frame.save(output.with_name(output.stem+'-start.png'))
+                frame.save(output.with_name(output.stem+'-end.png'))
+        print(output)
+        return
     trace = np.load(directory/f'trial_{args.trial:05d}'/'trajectory.npz')['state']
     result = read_json(directory/f'trial_{args.trial:05d}'/'result.json')
     model = mujoco.MjModel.from_xml_path(str(directory/'scene.xml'))
