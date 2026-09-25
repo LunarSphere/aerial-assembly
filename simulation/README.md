@@ -7,23 +7,23 @@ required by that input. No CAD service connection is needed.
 
 ## Install
 
-Use Python 3.11 or newer from this directory:
+With `uv` installed, run this from the `simulation/` directory:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e '.[test,video]'
+uv sync --all-extras
 ```
 
-The video extra is optional. On Windows, use Linux/WSL for `cad-grid`, which
-uses Unix file locking.
+This creates or updates the project environment using `uv.lock`, including the
+test and video extras. Run project commands through `uv run`; manual environment
+activation is unnecessary. On Windows, use Linux/WSL for `cad-grid`, which uses
+Unix file locking.
 
 ## Run a drop
 
 ```bash
-aerial cad-drop two_peg_block --config experiment_configs/cad-experiment-fast.json --out runs/drop
-aerial replay runs/drop
-aerial render runs/drop --out runs/drop/replay.mp4
+uv run --all-extras aerial cad-drop two_peg_block --config experiment_configs/cad-experiment-fast.json --out runs/drop
+uv run --all-extras aerial replay runs/drop
+uv run --all-extras aerial render runs/drop --out runs/drop/replay.mp4
 ```
 
 Each run needs a new output directory. The example runs a 0.3-second trial
@@ -46,11 +46,11 @@ their respective socket openings at the end of the trial. This geometric check
 does not require a dwell, stable pose, or reference drop.
 
 ```bash
-aerial cad-grid two_peg_block \
+uv run --all-extras aerial cad-grid two_peg_block \
   --config experiment_configs/cad-experiment-grid-fast-reference-27.json \
   --out runs/grid --dry-run
 
-aerial cad-grid two_peg_block \
+uv run --all-extras aerial cad-grid two_peg_block \
   --config experiment_configs/cad-experiment-grid-fast-reference-27.json \
   --out runs/grid --record-trial 0 --record-trial 26
 ```
@@ -84,3 +84,5 @@ geometry is only a regression fixture and does not represent the supplied
 block. Tests marked `requires_local_model` use the checked-in local model;
 three-solid integration cases are skipped unless a separate
 `three_part_export/assets/` directory is available.
+
+Run the test suite with `uv run --all-extras pytest`.

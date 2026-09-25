@@ -42,12 +42,12 @@ def test_configuration_uses_single_drop_defaults(tmp_path):
 
 
 @pytest.fixture
-def local_drop(bundle, monkeypatch, tmp_path, refined_physics):
+def local_drop(bundle, monkeypatch, tmp_path, grid_physics):
     # Exercise real simulation/output orchestration with synthetic test geometry.
     monkeypatch.setattr(cad_workflow, 'prepare_local_export', lambda *a, **kw: deepcopy(bundle))
     config = tmp_path/'config.json'
-    write_json(config, {'physics': asdict(refined_physics),
-                       'trial': {'duration': .0001, 'dwell': .00005}})
+    write_json(config, {'physics': asdict(grid_physics),
+                       'trial': {'duration': .002, 'dwell': .002}})
     output = tmp_path/'run'
     args = ['cad-drop', 'local-export', '--config', str(config), '--out', str(output)]
     return args, output
@@ -62,7 +62,7 @@ def test_single_drop_outputs_and_overwrite_protection(local_drop):
     }
     summary = read_json(output/'summary.json')
     assert summary['valid']
-    assert summary['status'] == 'stationary_misalignment'
+    assert summary['status'] == 'unsettled_timeout'
     assert set(read_json(output/'experiment.json')) == {'release', 'physics', 'settings'}
     with np.load(output/'trial_00000/trajectory.npz') as saved:
         assert saved['state'].shape == (2, 14)

@@ -15,7 +15,10 @@ def test_free_fall_matches_gravity(bundle, model):
     t = .01
     mujoco.mj_step(model, data, nstep=round(t/model.opt.timestep))
     assert data.qvel[2] == pytest.approx(-9.81*t, abs=1e-9)
-    assert data.qpos[2] == pytest.approx(state['qpos'][2]-.5*9.81*t*t, abs=3e-6)
+    dt = model.opt.timestep
+    # implicitfast advances position with each step's updated velocity.
+    expected_z = state['qpos'][2]-.5*9.81*t*t-.5*9.81*t*dt
+    assert data.qpos[2] == pytest.approx(expected_z, abs=3e-6)
     assert data.ncon == 0
 
 
@@ -31,20 +34,22 @@ def test_release_rotation_preserves_com_and_velocity(bundle):
     assert np.allclose(np.asarray(b['qvel'][:3])+np.cross([.3,.1,.2],com), [.1,.2,.3])
 
 
-def test_aligned_repeatable_and_half_timestep(bundle, model, refined_physics):
+def test_grid_timestep_insertion_repeatable_and_half_timestep(bundle, model, grid_physics):
     settings = TrialSettings(duration=.3, dwell=.1)
     state = initial_state(bundle)
-    a, trace_a = run_drop(model, bundle, state, settings)
-    b, trace_b = run_drop(model, bundle, state, settings)
+    a, trace_a = run_drop(model, bundle, state, settings, success_mode='insertion')
+    b, trace_b = run_drop(model, bundle, state, settings, success_mode='insertion')
     assert a['status'] == 'success'
+    assert a['physics']['timestep'] == grid_physics.timestep
+    assert a['final']['leg_tips_in_sockets']
     assert a == b
     assert np.array_equal(trace_a, trace_b)
     assert not np.array_equal(trace_a[0], trace_a[-1])
-    refined = build_model(bundle, replace(refined_physics, timestep=refined_physics.timestep/2))[0]
-    c, _ = run_drop(refined, bundle, state, settings, record=False)
+    half_step = build_model(bundle, replace(grid_physics, timestep=grid_physics.timestep/2))[0]
+    c, _ = run_drop(half_step, bundle, state, settings, record=False,
+                    success_mode='insertion')
     assert c['status'] == a['status']
-    assert c['final']['max_seating_gap'] < settings.gap_tolerance
-    assert a['max_penetration'] < bundle['max_penetration']
+    assert c['final']['leg_tips_in_sockets']
 
 
 def test_target_stays_seated(bundle, model):

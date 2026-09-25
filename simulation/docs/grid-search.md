@@ -24,7 +24,7 @@ success mode is now `insertion`.
 Count states without preparing geometry or simulating:
 
 ```bash
-aerial cad-grid two_peg_block \
+uv run --all-extras aerial cad-grid two_peg_block \
   --config experiment_configs/cad-experiment-grid-fast-reference-27.json \
   --out runs/grid --dry-run
 ```
@@ -32,11 +32,11 @@ aerial cad-grid two_peg_block \
 Run selected states and retain their trajectories for replay or rendering:
 
 ```bash
-aerial cad-grid two_peg_block \
+uv run --all-extras aerial cad-grid two_peg_block \
   --config experiment_configs/cad-experiment-grid-fast-reference-27.json \
   --out runs/grid --record-trial 0 --record-trial 26
-aerial replay runs/grid --trial 0
-aerial render runs/grid --trial 26 --out runs/grid/last.mp4
+uv run --all-extras aerial replay runs/grid --trial 0
+uv run --all-extras aerial render runs/grid --trial 26 --out runs/grid/last.mp4
 ```
 
 Completed states are checkpointed one at a time. Continue an interrupted run

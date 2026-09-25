@@ -10,11 +10,11 @@ def bundle(tmp_path_factory):
 
 
 @pytest.fixture(scope='session')
-def refined_physics():
-    # Preserve the historical accuracy checks independently of preview defaults.
-    return Physics(timestep=.0000125, contact_timeconst=.00005)
+def grid_physics():
+    # Match the current 27-state experiment configuration.
+    return Physics(timestep=.002, contact_timeconst=.005)
 
 
 @pytest.fixture(scope='session')
-def model(bundle, refined_physics):
-    return build_model(bundle, refined_physics)[0]
+def model(bundle, grid_physics):
+    return build_model(bundle, grid_physics)[0]

@@ -65,10 +65,10 @@ def test_profile_rejects_unknown_topology(local_export):
 
 
 @pytest.mark.requires_three_part_export
-def test_infeasible_target_records_one_diagnostic_drop(local_export, tmp_path, refined_physics):
+def test_infeasible_target_records_one_diagnostic_drop(local_export, tmp_path, grid_physics):
     report = cad_drop(local_export,tmp_path/'run',cache=tmp_path/'cache',
-                      physics=refined_physics,
-                      settings=TrialSettings(duration=.0001,dwell=.00005))
+                      physics=grid_physics,
+                      settings=TrialSettings(duration=.002,dwell=.002))
     assert report['target_infeasible']
     assert report['valid']
     assert not report['geometry_feasible']
