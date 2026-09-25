@@ -163,7 +163,7 @@ def partition_body(body, sockets):
     lower, upper = body.bounds[:,1]
     side = body.triangles[np.all(abs(body.triangles[:,:,1]-upper) < 1e-7, axis=1)]
     if not len(side):
-        raise ValueError('GOAT collision profile requires planar side faces parallel to XZ')
+        raise ValueError('Extruded block collision profile requires planar side faces parallel to XZ')
     pieces = []
     for triangle in side:
         opposite = triangle.copy()

@@ -80,8 +80,8 @@ def configuration(path):
         raise ValueError('rotation_center must be bounds_center or com')
     success = values.get('success', {'mode': 'flush'})
     if (not isinstance(success, dict) or set(success) - {'mode', 'reference_run'} or
-            success.get('mode') not in ('flush', 'reference')):
-        raise ValueError('success requires mode flush or reference')
+            success.get('mode') not in ('flush', 'reference', 'insertion')):
+        raise ValueError('success requires mode flush, insertion, or reference')
     if (success['mode'] == 'reference') != bool(success.get('reference_run')):
         raise ValueError('reference mode requires reference_run; flush mode does not use one')
     return grid, physics, settings, center, success
@@ -173,7 +173,7 @@ def cad_grid(directory, output, *, config, density=600., mass_grams=None,
 def _run(directory, output, grid, physics, settings, center, success, density,
          mass_grams, cache, resume, max_states, record_successes, record_trials,
          progress_every, progress):
-    bundle = cad_workflow.prepare_download(directory, density=density, mass_grams=mass_grams,
+    bundle = cad_workflow.prepare_local_export(directory, density=density, mass_grams=mass_grams,
                                            cache=cache, progress=progress)
     reference = load_reference(success['reference_run'], bundle, settings) if success['mode'] == 'reference' else None
     manifest = {**grid.describe(), 'physics': asdict(physics), 'trial': asdict(settings),
@@ -196,7 +196,7 @@ def _run(directory, output, grid, physics, settings, center, success, density,
         write_json(output/'grid_search.json', manifest)
     if not gate['socket_probes']['passed']:
         raise ValueError('Collision probes failed; cannot score a grid')
-    if reference is None and not gate['passed']:
+    if success['mode'] == 'flush' and not gate['passed']:
         raise ValueError('Flush target is infeasible; use an accepted reference or repair geometry')
     points = bounds_points(bundle)
     pivot = (points.min(axis=0)+points.max(axis=0))/2 if center == 'bounds_center' else np.asarray(bundle['inertial']['com'])
@@ -247,6 +247,7 @@ def _run(directory, output, grid, physics, settings, center, success, density,
                 start = time.monotonic()
                 result, trace = run_drop(model, bundle, initial, settings, record=record,
                                         reference=reference,
+                                        success_mode=success['mode'],
                                         progress=lambda message: progress(f'State {index}: {message}'))
                 accepted = result['status'] == 'success'
                 recorded = index in record_trials or (record_successes and accepted)

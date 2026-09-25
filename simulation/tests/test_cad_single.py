@@ -7,7 +7,7 @@ import trimesh
 
 from aerial_assembly.cad_collision import partition_solid
 from aerial_assembly.cad_single import recognize_single
-from aerial_assembly.cad_workflow import prepare_download
+from aerial_assembly.cad_workflow import prepare_local_export
 from aerial_assembly.geometry import part_mesh
 from aerial_assembly.model import build_model
 from aerial_assembly.simulation import pose_metrics, validate_geometry
@@ -72,12 +72,12 @@ def test_profile_based_scoring_detects_bottoming():
     assert metrics['max_depth_error'] == pytest.approx(0)
 
 
-@pytest.mark.requires_mk2
-def test_mk2_distinguishes_socket_floor_from_hollow_peg(tmp_path):
-    directory = Path(__file__).resolve().parents[1]/'goat_mk2'
-    if not (directory/'assets/part_1.stl').exists():
-        pytest.fail('Integration blocked: restore the local goat_mk2 export.')
-    bundle = prepare_download(directory, cache=tmp_path/'cache')
+@pytest.mark.requires_local_model
+def test_local_model_distinguishes_socket_floor_from_hollow_peg(tmp_path):
+    directory = Path(__file__).resolve().parents[1]/'two_peg_block'
+    if not (directory/'part_1.stl').exists():
+        pytest.fail('Integration blocked: two_peg_block/part_1.stl is missing.')
+    bundle = prepare_local_export(directory, cache=tmp_path/'cache')
     assert len(bundle['visual']) == 1
     for socket, peg in zip(bundle['sockets'], bundle['legs']):
         assert socket['depth'] == pytest.approx(.022666667, abs=1e-7)

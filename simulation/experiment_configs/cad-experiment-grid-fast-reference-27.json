@@ -13,7 +13,7 @@
     "theta_z_deg": [0, 0, 1]
   },
   "rotation_center": "bounds_center",
-  "success": {"mode": "reference", "reference_run": "runs/drop-fast3"},
+  "success": {"mode": "insertion"},
   "trial": {
     "duration": 0.3,
     "dwell": 0.1,

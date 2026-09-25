@@ -1,15 +1,13 @@
 <?xml version="1.0" ?>
-<!-- Generated using onshape-to-robot -->
-<!-- Onshape https://cad.onshape.com/documents/9aedd902d9f4dee95f6f5669/w/7949dab0ca2a5f2bbdbe781f/e/c3f00052bf61614c03dc045b -->
-<mujoco model="goat_mk2">
+<mujoco model="two_peg_block">
   <compiler
     angle="radian"
-    meshdir="assets"
+    meshdir="."
     autolimits="true"
     inertiafromgeom="true"
     inertiagrouprange="3 3"/>
   <default>
-    <default class="goat_mk2">
+    <default class="two_peg_block">
       <joint frictionloss="0.1" armature="0.005"/>
       <position kp="50" dampratio="1"/>
       <default class="visual">
@@ -22,7 +20,7 @@
   </default>
   <worldbody>
     <!-- Link part_1 -->
-    <body name="part_1" pos="0 0 0" quat="1 0 0 0" childclass="goat_mk2">
+    <body name="part_1" pos="0 0 0" quat="1 0 0 0" childclass="two_peg_block">
       <freejoint name="part_1_freejoint"/>
       <!-- Part part_1 -->
       <geom type="mesh" class="visual" pos="-0.0360284 2.18e-10 -0.0384847" quat="1 0 0 0" mesh="part_1" material="part_1_material"/>

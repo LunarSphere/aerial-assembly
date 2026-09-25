@@ -1,6 +1,7 @@
 from copy import deepcopy
 from dataclasses import asdict
 import json
+from pathlib import Path
 
 import pytest
 
@@ -41,7 +42,7 @@ def test_profile_center_rotation_and_clearance(bundle):
 
 @pytest.fixture
 def local_grid(bundle, monkeypatch, tmp_path, refined_physics):
-    monkeypatch.setattr(cad_workflow, 'prepare_download', lambda *a, **kw: deepcopy(bundle))
+    monkeypatch.setattr(cad_workflow, 'prepare_local_export', lambda *a, **kw: deepcopy(bundle))
     config = tmp_path/'config.json'
     write_json(config, {'grid_search': {'dx_mm': [0, 2, 1]},
                        'physics': asdict(refined_physics),
@@ -165,6 +166,29 @@ def test_geometry_gate_prevents_grid_scoring(local_grid, monkeypatch, probe_fail
     monkeypatch.setattr(cad_workflow, 'validate_geometry', rejected)
     assert cli.main(args) == 2
     assert not (out/'grid_results.jsonl').exists()
+
+
+def test_insertion_grid_does_not_require_reference_or_flush_feasibility(local_grid, monkeypatch):
+    config, out, args = local_grid
+    values = read_json(config)
+    values['success'] = {'mode': 'insertion'}
+    write_json(config, values)
+    validate = cad_workflow.validate_geometry
+    def flush_infeasible(*a, **kw):
+        return {**validate(*a, **kw), 'passed': False}
+    monkeypatch.setattr(cad_workflow, 'validate_geometry', flush_infeasible)
+    assert cli.main(args) == 0
+    report = read_json(out/'grid_summary.json')
+    assert report['success_mode'] == 'insertion'
+    assert not report['geometry_feasible']
+    assert report['completed_states'] == 3
+
+
+def test_27_state_config_uses_insertion_scoring():
+    path = Path(__file__).parents[1]/'experiment_configs/cad-experiment-grid-fast-reference-27.json'
+    g, _, _, _, success = grid.configuration(path)
+    assert g.total == 27
+    assert success == {'mode': 'insertion'}
 
 
 def test_reference_grid_accepts_infeasible_flush_target(local_grid, monkeypatch, bundle, model, tmp_path,

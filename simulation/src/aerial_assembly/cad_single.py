@@ -1,4 +1,4 @@
-"""Measure the two vertical peg/socket profiles in a single watertight GOAT solid."""
+"""Measure two vertical peg/socket profiles in a single watertight block solid."""
 import numpy as np
 from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components
@@ -60,7 +60,7 @@ def recognize_single(mesh):
         if not any(np.linalg.norm(ring['center']-c) < 1e-6 for c in centers):
             centers.append(ring['center'])
     if len(centers) != 2:
-        raise ValueError('Single-solid GOAT profile requires exactly two vertical circular peg/socket axes')
+        raise ValueError('Single-solid block profile requires exactly two vertical circular peg/socket axes')
     sockets, legs, seating, shifts, clearances = [], [], [], [], []
     for center in sorted(centers, key=lambda c: c[0]):
         axis = [r for r in rings if np.linalg.norm(r['center']-center) < 1e-6]

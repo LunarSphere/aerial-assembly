@@ -22,7 +22,7 @@ def pose_metrics(bundle, pos, quat):
         normal = np.asarray(pair.get('normal', [0, 0, 1]))
         normal = normal / np.linalg.norm(normal)
         gaps.append(abs(float(np.dot(R.apply(pair['upper'])+pos-pair['lower'], normal))))
-    depths, depth_errors, inside = [], [], []
+    depths, depth_errors, inside, tips_in_sockets = [], [], [], []
     for leg, socket in zip(bundle['legs'], bundle['sockets']):
         S = rotation(socket.get('quat', [1, 0, 0, 0]))
         pts = S.inv().apply(R.apply(leg['surface_probes'])+pos-socket['mouth'])
@@ -39,10 +39,22 @@ def pose_metrics(bundle, pos, quat):
         allowance = bundle['max_penetration']
         inside.append(bool(np.all((np.linalg.norm(pts[:,:2], axis=1) <= allowed_radius+allowance) &
                                   (d >= -allowance) & (d <= socket['depth']+allowance))))
-        depths.append(float(-tip[2]))
+        tip_depth = float(-tip[2])
+        depths.append(tip_depth)
         depth_errors.append(abs(float(-tip[2])-leg['target_depth']))
+        if 'radius_profile' in socket:
+            tip_radius = float(np.interp(tip_depth, profile[:, 0], profile[:, 1]))
+        elif socket['lead_depth']:
+            blend = float(np.clip(1-tip_depth/socket['lead_depth'], 0, 1))
+            tip_radius = socket['throat_radius'] + blend*(socket['opening_radius']-socket['throat_radius'])
+        else:
+            tip_radius = socket['throat_radius']
+        tip_fits = (tip_depth >= 0 and tip_depth <= socket['depth'] and
+                    np.linalg.norm(tip[:2]) <= tip_radius+allowance)
+        tips_in_sockets.append(bool(tip_fits))
     return {'translation_error': translation, 'angle_error': angle, 'max_seating_gap': max(gaps),
-            'insertion_depths': depths, 'max_depth_error': max(depth_errors), 'legs_inside': all(inside)}
+            'insertion_depths': depths, 'max_depth_error': max(depth_errors), 'legs_inside': all(inside),
+            'leg_tips_in_sockets': all(tips_in_sockets)}
 
 
 def contact_metrics(model, data, forces=True):
@@ -127,8 +139,19 @@ def meets_reference(metrics, bundle, settings, reference):
             not metrics['floor_contact'])
 
 
+def meets_insertion(metrics):
+    """Insertion success means every leg tip is inside its socket at trial end."""
+    return metrics['leg_tips_in_sockets']
+
+
 def run_drop(model, bundle, initial, settings=TrialSettings(), record=True, progress=None,
-             reference=None):
+             reference=None, success_mode=None):
+    if success_mode is None:
+        success_mode = 'reference' if reference is not None else 'flush'
+    if success_mode not in ('flush', 'insertion', 'reference'):
+        raise ValueError('success_mode must be flush, insertion, or reference')
+    if (success_mode == 'reference') != (reference is not None):
+        raise ValueError('reference success mode requires exactly one accepted reference')
     from .model import set_state
     data = set_state(model, initial)
     dt = float(model.opt.timestep)
@@ -161,8 +184,12 @@ def run_drop(model, bundle, initial, settings=TrialSettings(), record=True, prog
             final = reference_metrics(final, data.qpos[:3], data.qpos[3:], bundle, reference)
         max_penetration = max(max_penetration, final['penetration'])
         touched_floor |= final['floor_contact']
-        accepted = (meets_target(final, bundle, settings) if reference is None else
-                    meets_reference(final, bundle, settings, reference))
+        if success_mode == 'insertion':
+            accepted = meets_insertion(final)
+        elif success_mode == 'reference':
+            accepted = meets_reference(final, bundle, settings, reference)
+        else:
+            accepted = meets_target(final, bundle, settings)
         if accepted:
             if held_since is None:
                 held_since = float(data.time)
@@ -179,13 +206,16 @@ def run_drop(model, bundle, initial, settings=TrialSettings(), record=True, prog
         invalid = 'solver_warning_or_nonfinite_state'
     held_for = 0.0 if held_since is None else float(data.time)-held_since
     status, reason = classify(final, held_for, bundle, settings, invalid, touched_floor)
-    if reference is not None and status not in ('success', 'invalid', 'missed_receiver'):
+    if success_mode == 'insertion' and meets_insertion(final):
+        status = 'success'
+        reason = None
+    if success_mode == 'reference' and status not in ('success', 'invalid', 'missed_receiver'):
         moving = (final['linear_speed'] > settings.linear_speed_tolerance or
                   final['angular_speed'] > settings.angular_speed_tolerance)
         status = ('unsettled_timeout' if moving or meets_reference(final, bundle, settings, reference)
                   else 'reference_mismatch')
     result = {'schema_version': 1, 'status': status, 'invalid_reason': reason,
-              'success_mode': 'flush' if reference is None else 'reference',
+              'success_mode': success_mode,
               'asset_hash': bundle['asset_hash'], 'geometry_source': bundle['source'],
               'initial_state': initial, 'settings': asdict(settings),
               'physics': {'timestep': dt, 'friction': float(model.geom_friction[-1,0]),

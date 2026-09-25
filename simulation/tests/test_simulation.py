@@ -6,7 +6,7 @@ import pytest
 
 from aerial_assembly.config import Physics, Release, TrialSettings
 from aerial_assembly.model import build_model, initial_state, set_state
-from aerial_assembly.simulation import classify, pose_metrics, run_drop
+from aerial_assembly.simulation import classify, meets_insertion, pose_metrics, run_drop
 
 
 def test_free_fall_matches_gravity(bundle, model):
@@ -96,9 +96,26 @@ def test_quaternion_sign_does_not_change_score(bundle):
     assert a == b
 
 
+def test_insertion_success_only_requires_every_tip_inside_its_socket(bundle):
+    target = pose_metrics(bundle, bundle['target']['pos'], bundle['target']['quat'])
+    inside_depth = .001
+    current_depth = min(target['insertion_depths'])
+    position = np.asarray(bundle['target']['pos'], dtype=float).copy()
+    position[2] += current_depth-inside_depth
+    geometry = pose_metrics(bundle, position, bundle['target']['quat'])
+    assert geometry['leg_tips_in_sockets']
+    assert meets_insertion(geometry)
+    outside = position.copy()
+    outside[2] += inside_depth+.001
+    outside_metrics = pose_metrics(bundle, outside, bundle['target']['quat'])
+    assert not outside_metrics['leg_tips_in_sockets']
+    assert not meets_insertion(outside_metrics)
+
+
 def test_invalid_settings_rejected():
+    assert Physics(timestep=.002, contact_timeconst=.005).contact_timeconst == .005
     with pytest.raises(ValueError):
-        Physics(timestep=.1, contact_timeconst=.00005)
+        Physics(timestep=.002, contact_timeconst=.003)
     with pytest.raises(ValueError):
         TrialSettings(duration=.1,dwell=.5)
     with pytest.raises(ValueError):

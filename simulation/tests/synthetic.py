@@ -14,7 +14,7 @@ def convex_part(name, vertices):
 
 
 def demo_geometry(output, ramp_angle=50.0, lead_angle=30.0, facets=48):
-    """Synthetic test fixture, NOT a reconstruction of the user's Onshape design.
+    """Synthetic test fixture, NOT a reconstruction of the user's CAD design.
 
     lead_angle is the funnel's angle from vertical. All dimensions are SI.
     """
@@ -86,7 +86,7 @@ def demo_geometry(output, ramp_angle=50.0, lead_angle=30.0, facets=48):
     points = np.concatenate([part_mesh(p).vertices for p in parts])
     bundle = {'schema_version': 1, 'prepared': True, 'name': 'SYNTHETIC_two_socket_fixture',
               'source': {'kind': 'synthetic', 'revision': 'fixture-v2',
-                         'warning': 'NOT the Onshape block. No guide lips. Uniform effective density 600 kg/m^3. Socket sector tops recessed 5 um to avoid redundant support contacts.'},
+                         'warning': 'NOT the supplied block. No guide lips. Uniform effective density 600 kg/m^3. Socket sector tops recessed 5 um to avoid redundant support contacts.'},
               'parameters': {'ramp_angle_deg': ramp_angle, 'lead_angle_from_vertical_deg': lead_angle, 'facets': facets},
               'collision': parts, 'visual': [], 'clearance': throat-radius, 'max_penetration': 0.000025,
               'expected_extents': np.ptp(points, axis=0).tolist(),

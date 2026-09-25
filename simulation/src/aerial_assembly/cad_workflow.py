@@ -1,4 +1,4 @@
-"""Local drop preparation for the GOAT two-peg CAD family.
+"""Local drop preparation for supported two-peg block exports.
 
 Feature recognition is deliberately limited to two vertical circular pegs and
 blind coaxial tapered sockets. Unsupported topology fails instead of reusing
@@ -24,7 +24,7 @@ def recognize_features(meshes):
         from .cad_single import recognize_single
         return recognize_single(meshes[0])
     if len(meshes) != 3:
-        raise ValueError('GOAT profile expects one supported solid or three unmerged solids: two pegs and the body')
+        raise ValueError('Block profile expects one supported solid or three unmerged solids: two pegs and the body')
     ordered = sorted(meshes, key=lambda m: m.volume)
     pegs, body = ordered[:2], ordered[2]
     pegs.sort(key=lambda m: m.bounds[:, 0].mean())
@@ -34,10 +34,10 @@ def recognize_features(meshes):
         center = (low[:2]+high[:2])/2
         radius = float((high[0]-low[0])/2)
         if not peg.is_convex or abs(high[1]-low[1]-2*radius) > 1e-6:
-            raise ValueError('GOAT profile requires convex vertical circular pegs')
+            raise ValueError('Block profile requires convex vertical circular pegs')
         radial = np.linalg.norm(peg.vertices[:, :2]-center, axis=1)
         if abs(radial.max()-radius) > 1e-6 or high[2]-low[2] < 2*radius:
-            raise ValueError('Peg shape/orientation is unsupported by the GOAT profile')
+            raise ValueError('Peg shape/orientation is unsupported by the block profile')
         # Each socket has floor and throat rings of equal radius and a wider mouth.
         candidates = []
         for height in np.unique(np.round(body.vertices[:, 2], 6)):
@@ -98,9 +98,9 @@ def _inertia(meshes, density):
     return {'mass': float(sum(masses)), 'com': com.tolist(), 'matrix': inertia.tolist()}
 
 
-def prepare_download(directory, *, density=600., mass_grams=None, collision_error=.0000005,
+def prepare_local_export(directory, *, density=600., mass_grams=None, collision_error=.0000005,
                      cache='assets/cad-cache', progress=print):
-    """Freeze downloaded parts into one block; decompose only collision geometry."""
+    """Freeze a local robot export into one block; decompose collision geometry."""
     if density <= 0 or not np.isfinite(density) or (mass_grams is not None and (mass_grams <= 0 or not np.isfinite(mass_grams))):
         raise ValueError('Density/mass must be finite and positive')
     if collision_error <= 0 or not np.isfinite(collision_error):
@@ -109,7 +109,7 @@ def prepare_download(directory, *, density=600., mass_grams=None, collision_erro
     model, data = _load(directory/'robot.xml')
     import mujoco
     if model.neq or model.nu or any(int(t) != mujoco.mjtJoint.mjJNT_FREE for t in model.jnt_type):
-        raise ValueError('GOAT download must contain only rigid parts/root free joints, without actuators or equality constraints')
+        raise ValueError('Local block export must contain only rigid parts/root free joints, without actuators or equality constraints')
     parts = _parts(model, data, set(range(1,model.nbody)), np.zeros(3), np.eye(3))
     visual = parts['visual'] or parts['collision']
     meshes = [part_mesh(p) for p in visual]
@@ -127,9 +127,7 @@ def prepare_download(directory, *, density=600., mass_grams=None, collision_erro
                               'Measured total mass, uniform density distribution assumed')
     inertial['density_kg_m3'] = effective_density
     source_files = {str(p.relative_to(directory)): hashlib.sha256(p.read_bytes()).hexdigest()
-                    for p in sorted(directory.rglob('*')) if p.is_file() and p.suffix in ('.xml','.stl','.obj','.part','.json')}
-    revisions = sorted({read_json(p).get('documentMicroversion') for p in directory.rglob('*.part')
-                        if read_json(p).get('documentMicroversion')})
+                    for p in sorted(directory.rglob('*')) if p.is_file() and p.suffix in ('.xml','.stl','.obj','.json')}
     collision = []
     from .cad_collision import partition_body, partition_solid
     options = {'method': 'extruded-profile-minus-socket-frusta', 'version': 1, 'plane_tolerance_m': 1e-8,
@@ -163,9 +161,9 @@ def prepare_download(directory, *, density=600., mass_grams=None, collision_erro
                 raise ValueError('Decomposition produced a nonconvex or invalid collision solid')
             collision.append({'name': f'part_{i}_convex_{j}', 'type': 'mesh',
                               'vertices': piece.vertices.tolist(), 'faces': piece.faces.tolist()})
-    bundle = {'schema_version': 1, 'name': 'goat_download', 'visual': visual, 'collision': collision,
+    bundle = {'schema_version': 1, 'name': 'two_peg_block', 'visual': visual, 'collision': collision,
               'inertial': inertial, **features,
-              'source': {'kind': 'onshape_to_robot_goat_profile', 'revision': revisions,
+              'source': {'kind': 'local_robot_export',
                          'files_sha256': source_files, 'provisional_mass': mass_grams is None,
                          'assumptions': ['All exported parts form one rigid block', 'Uniform effective material density'],
                          'collision': options}}
@@ -189,7 +187,7 @@ def cad_drop(directory, output, *, density=600., mass_grams=None,
     """Record one local drop, including diagnostic drops of infeasible geometry."""
     output = Path(output)
     output.mkdir(parents=True, exist_ok=False)
-    bundle = prepare_download(directory, density=density, mass_grams=mass_grams,
+    bundle = prepare_local_export(directory, density=density, mass_grams=mass_grams,
                               collision_error=collision_error, cache=cache, progress=progress)
     write_json(output/'geometry.json', bundle)
     model, xml = build_model(bundle, physics)

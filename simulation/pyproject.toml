@@ -22,6 +22,6 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
-    "requires_export: requires original export_example/assets meshes (fails explicitly if absent)",
-    "requires_mk2: requires the local goat_mk2 single-solid export (fails explicitly if absent)",
+    "requires_three_part_export: requires a local three_part_export/assets mesh set (fails explicitly if absent)",
+    "requires_local_model: requires the two_peg_block single-solid model (fails explicitly if absent)",
 ]

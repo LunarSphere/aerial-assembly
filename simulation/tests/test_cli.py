@@ -10,8 +10,8 @@ from aerial_assembly.config import read_json, write_json
 
 
 @pytest.mark.parametrize('command', [
-    'onshape-export', 'onshape-variables', 'batch', 'sweep', 'compare',
-    'cad-rank', 'demo-grid', 'demo', 'prepare', 'prepare-mjcf', 'inspect-mjcf',
+    'batch', 'sweep', 'compare', 'cad-rank', 'demo-grid', 'demo', 'prepare',
+    'prepare-mjcf', 'inspect-mjcf',
     'validate', 'drop', 'converge',
 ])
 def test_removed_commands_are_rejected(command):
@@ -23,7 +23,7 @@ def test_removed_commands_are_rejected(command):
 @pytest.mark.parametrize('flag', ['--count', '--seed'])
 def test_removed_drop_options_are_rejected(flag):
     with pytest.raises(SystemExit) as error:
-        cli.main(['cad-drop', 'export_example', '--out', 'unused', flag, '2'])
+        cli.main(['cad-drop', 'two_peg_block', '--out', 'unused', flag, '2'])
     assert error.value.code == 2
 
 
@@ -44,7 +44,7 @@ def test_configuration_uses_single_drop_defaults(tmp_path):
 @pytest.fixture
 def local_drop(bundle, monkeypatch, tmp_path, refined_physics):
     # Exercise real simulation/output orchestration with synthetic test geometry.
-    monkeypatch.setattr(cad_workflow, 'prepare_download', lambda *a, **kw: deepcopy(bundle))
+    monkeypatch.setattr(cad_workflow, 'prepare_local_export', lambda *a, **kw: deepcopy(bundle))
     config = tmp_path/'config.json'
     write_json(config, {'physics': asdict(refined_physics),
                        'trial': {'duration': .0001, 'dwell': .00005}})
