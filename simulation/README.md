@@ -126,3 +126,31 @@ three-solid integration cases are skipped unless a separate
 `three_part_export/assets/` directory is available.
 
 Run the test suite with `uv run --all-extras pytest`.
+
+
+## Feedback 
+- angled pegs should be able to build an infinite overhang
+- try to find a block design that can generalize to any structure. | generablizable shape could be voxelized
+- currently account for left and right error | trick: make sure there is always error in one direction then you can simplify design to rely on the error in one direction
+- if we rely on one side of error| one side slides then we can rely on motion that is not verticle | big issue with sliding is friction make it more steep than the friction coefficient suggets
+- bouncing behavior from the lego design
+- we should shot for being able to stretch out to N number of blocks in sim. | rather than say what design does this ask what is the space of designs that satisfy our conditions. 
+- ex: rule if we have an angle and we expect slidng to happen then we we need to ensure we have an angle that will allow the block to slide down. you can use an arctangent for this. 
+- ex2: lets say we dont want to tower to fall down could we angle the peg such that it| imagine if you can angle the peg such that it cant tilt out| you saw a reel that describes something similar the other day. check your camera roll
+- alternating angles to ensure the arch cant collapse from either direction. 
+- ex3: add test cases to make you think about what could cause structure to collapse
+- ex4: skinny pegs will break how do we ensure they are struturally sound: pegs decide assembly so imagine a cone begs lead the way but the blocks body will resist forces. 
+- ex4: use I-beams to resist structural flexing
+- ex6: big picuture come up with rules that justfy the design we have chosen. | this principal is also true for the gripper. 
+- we should be able to paint a structure with the block we choose
+- Can we assume that the block is extremely heavy/attatched to the ground. yes. its also very interesting if the block is not fixed to the ground.  
+- the keystone bridge is called a roman arch
+- expansion different paper: how do we disassemble these structures| could we take our assembly apart and build something else. tower to | arch
+- Jamming: jamming gripper: bag of sand that complies nicely to structure you are gripping. the sand all jams up when you do something to it. | this would be a cool way to make a gripper that conforms to the object you want to grasp. 
+- another perspecive could i make structure permanant by sprinkling grains of sand on top of it. 
+- assemble two things and make it pernant or semi permanant by jamming in certain ways | another paper: anyforce you apply causes closing force around whatever you apply. 
+- start with one of these ideas | don't be afraid to ask for help. 
+- try having gpt 6 draw the cad model for you in blender | no answers but good ideas. | turn a principal into a design
+- check related work for the ideas to ensure new papers havent explored this. 
+- use computational math to solve for best design by doing it in sim | in-progress | this should come after defining the design. 
+

@@ -1,0 +1,6 @@
+{
+    "url": "https://cad.onshape.com/documents/9aedd902d9f4dee95f6f5669/w/7949dab0ca2a5f2bbdbe781f/e/63a7035f74b8098695910a34",
+    "robot_name": "two_peg_block_complement",
+    "output_format": "mujoco",
+    "simplify_stls": true
+}
