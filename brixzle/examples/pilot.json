@@ -1,0 +1,13 @@
+{
+  "simulation": {"manipulation_mode": "floating"},
+  "search": {
+    "population": 8,
+    "generations": 3,
+    "trials": 2,
+    "workers": 2,
+    "shortlist": 3,
+    "reevaluate_trials": 8,
+    "finalists": 1,
+    "validation_trials": 16
+  }
+}

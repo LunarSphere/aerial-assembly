@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "brixzle"
+version = "0.1.0"
+description = "Printable passive-grasp brick geometry, contact assembly trials, and multiobjective optimization"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+  "cadquery==2.7.0",
+  "mujoco==3.3.7",
+  "numpy==2.2.6",
+  "scipy==1.16.2",
+  "networkx==3.5",
+  "pymoo==0.6.1.6",
+  "cloudpickle==3.1.1",
+  "matplotlib==3.11.2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest==8.4.2"]
+
+[project.scripts]
+brixzle = "brixzle.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["integration: CAD and physics integration checks"]
