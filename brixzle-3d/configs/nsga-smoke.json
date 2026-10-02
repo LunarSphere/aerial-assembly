@@ -1,0 +1,21 @@
+{
+  "run": {
+    "pop": 12,
+    "gens": 2,
+    "partitions": 2,
+    "workers": 10
+  },
+  "eval": {
+    "drop_samples": 6,
+    "frictions": [
+      0.35
+    ],
+    "structures": [
+      "pillar"
+    ],
+    "noisy": [],
+    "seeds": [
+      1
+    ]
+  }
+}

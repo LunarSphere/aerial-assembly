@@ -1,0 +1,20 @@
+{
+  "shape": "L",
+  "U": 24.0,
+  "H": 13.0,
+  "theta": 35.0,
+  "peg_w": 5.0,
+  "peg_L": 5.0,
+  "peg_taper": 2.0,
+  "peg_lean": 15.0,
+  "tip_chamfer": 0.8,
+  "clearance": 0.25,
+  "socket_extra": 1.0,
+  "mouth_chamfer": 1.0,
+  "gap": 0.3,
+  "wall": 1.2,
+  "fork_d": 2.0,
+  "fork_clearance": 0.3,
+  "shell": 0.8,
+  "infill": 0.2
+}

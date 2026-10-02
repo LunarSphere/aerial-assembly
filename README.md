@@ -1,5 +1,8 @@
 # Aerial assembly
 
+The parametric drop-assembled brick (CadQuery geometry, MuJoCo assembly trials,
+NSGA-III search) is in [`brixzle/`](brixzle/README.md).
+
 The simulation project, CAD files, saved drops, and Python environment are in
 [`simulation/`](simulation/README.md).
 
