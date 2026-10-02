@@ -160,6 +160,29 @@ def cmd_push(args):
     print(json.dumps(res))
 
 
+def cmd_ring(args):
+    from . import ring as Rg
+    p = load_params(args.params)
+    out = _new_dir(args.out)
+    parts = Rg.build_parts(p)
+    if args.export:
+        for name, b in parts.items():
+            if 'shape' in b:
+                cad.export(b, out/f'part_{name}')
+    bricks = Rg.ring(args.n, args.courses)
+    frames = [] if args.video else None
+    result, (model, data, info, xml) = Rg.assemble(p, parts, bricks, _trial_config(args), seed=args.seed,
+                                                   stop_on_fail=not args.keep_going, record=frames)
+    result['parts_mass_g'] = {k: v['mass_g'] for k, v in parts.items()}
+    write_json(out/'summary.json', result)
+    (out/'scene.xml').write_text(xml)
+    if args.video:
+        from .render import render
+        render(model, frames, out/'assembly.mp4', azimuth=135, elevation=-30)
+        render(model, frames, out/'final.png', azimuth=135, elevation=-30)
+    print(f'ring {args.n}x{args.n} x{args.courses}: {result["status"]}, {result["seated"]}/{result["total"]} seated')
+
+
 def cmd_optimize(args):
     from . import optimize as O
     cfg = read_json(args.config) if args.config else {}
@@ -217,6 +240,16 @@ def parser():
     sp.add_argument('--keep-going', action='store_true')
     sp.add_argument('--video', action='store_true')
     sp.set_defaults(func=cmd_assemble)
+    sp = sub.add_parser('ring', help='3D square ring: 2.5D walls along X and Y joined by turn pieces')
+    common(sp)
+    sp.add_argument('--n', type=int, default=6, help='ring side in cells (even, >= 6)')
+    sp.add_argument('--courses', type=int, default=4)
+    sp.add_argument('--ideal', action='store_true')
+    sp.add_argument('--track', action='store_true')
+    sp.add_argument('--keep-going', action='store_true')
+    sp.add_argument('--export', action='store_true', help='also write STL/STEP of the turn/corner/closer parts')
+    sp.add_argument('--video', action='store_true')
+    sp.set_defaults(func=cmd_ring)
     sp = sub.add_parser('push', help='ramped lateral push on an ideal tower')
     common(sp, out=False)
     sp.add_argument('--height', type=int, default=6)

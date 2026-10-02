@@ -33,11 +33,13 @@ def parked_position(j):
     return np.array([1.0 + 0.2*j, 1.0, PARK_Z])
 
 
-def build_scene(p: BrickParams, brick, bases, n_bricks, physics: Physics, visual=True, body_parts=None):
+def build_scene(p: BrickParams, brick, bases, n_bricks, physics: Physics, visual=True, body_parts=None,
+                static=None):
     """Return (model, xml, info). ``bases`` are [(v0, v1[, direction])] voxel ranges.
 
     ``brick`` is one bundle or {part: bundle}; ``body_parts`` names the part of
-    each pooled body (default: all 'A').
+    each pooled body (default: all 'A'). ``static`` adds anchored convex vertex
+    sets (mm, world frame), e.g. the per-cell base of a 3D ring.
     """
     bundles = brick if 'collision' not in brick else {'A': brick}
     body_parts = list(body_parts or ['A']*n_bricks)
@@ -69,6 +71,12 @@ def build_scene(p: BrickParams, brick, bases, n_bricks, physics: Physics, visual
             _mesh(asset, name, piece + np.array([v0*p.U, 0, 0]))
             ET.SubElement(world, 'geom', name=name, type='mesh', mesh=name, rgba='.55 .55 .58 1',
                           contype='1', conaffinity='1')
+    for j, piece in enumerate(static or []):
+        name = f'static_{j}'
+        floor_z = min(floor_z, float(np.min(piece[:, 2])))
+        _mesh(asset, name, piece)
+        ET.SubElement(world, 'geom', name=name, type='mesh', mesh=name, rgba='.55 .55 .58 1',
+                      contype='1', conaffinity='1')
     ET.SubElement(world, 'geom', name='floor', type='plane', size='3 3 .01',
                   pos=f'0 0 {floor_z*MM - 0.0005}', rgba='.2 .22 .25 1', contype='1', conaffinity='1')
     for name, bundle in bundles.items():
@@ -91,7 +99,9 @@ def build_scene(p: BrickParams, brick, bases, n_bricks, physics: Physics, visual
             ET.SubElement(body, 'geom', name=f'brick{j}_c{k}', type='mesh', mesh=f'{name}_col_{k}',
                           group='3', rgba='.3 .6 .9 .4', contype='1', conaffinity='1')
         if visual and 'mesh' in bundle:
-            rgba = '.95 .55 .15 1' if (name == 'B' if len(bundles) > 1 else j % 2) else '.25 .55 .85 1'
+            palette = {'B': '.95 .55 .15 1', 'L3': '.95 .55 .15 1', 'I3': '.35 .75 .4 1', 'K2': '.85 .3 .35 1'}
+            rgba = palette.get(name, '.25 .55 .85 1') if len(bundles) > 1 else \
+                ('.95 .55 .15 1' if j % 2 else '.25 .55 .85 1')
             ET.SubElement(body, 'geom', name=f'brick{j}_vis', type='mesh', mesh=f'{name}_vis',
                           group='2', rgba=rgba, contype='0', conaffinity='0', mass='0')
     xml = ET.tostring(root, encoding='unicode')

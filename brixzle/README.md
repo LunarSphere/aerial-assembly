@@ -179,3 +179,58 @@ What limits it:
 Next: a capture feature for the hanging voxel (for example a downward guide
 lip that engages the supporter's front ramp before the COM leaves support),
 or a place-then-push strategy for cantilever bricks.
+
+## 3D from the 2.5D system: walls along X and Y with turn pieces (`ring.py`)
+
+The 2.5D brick goes 3D without changing its profile. Every brick is built from
+**cells**: one voxel of the A profile swept through the depth with the gutter.
+A cell can sit at any quarter-turn yaw. A cell nests on the one below exactly
+when its yaw differs by 180° (the A/B rule). A wall along Y is just the same
+brick rotated 90°.
+
+| Part | Cells | Role | Mass |
+|---|---|---|---|
+| S2 | 2 straight | the existing brick | 13.7 g |
+| **L3 turn** | corner + 1 along x + 1 along y | the turn, used on even courses | 20.5 g |
+| I3 | 3 straight, owns the corner | corner on odd courses | 21.4 g |
+| K2 closer | 2 straight, upstream end cut back | last brick of odd courses | 12.5 g |
+
+Design rules that came out of building it:
+
+- **A rigid turn seats along one stroke.** Only the L3's corner and x-arm
+  cells carry teeth. Its y-arm cell (yaw 270, profile along its own wall)
+  nests by keel and gutter. Teeth along both x and y would fight each other.
+- **Corner bond.** Corners alternate L3 / I3 per course, like masonry. The
+  straights then step one cell per course, and every cell column alternates
+  yaw by 180°. `ring.check_columns` verifies this.
+- **A closed ring needs a closer.** On odd courses every seating stroke points
+  back into its neighbour all the way round the loop, so no insertion order
+  exists. A depth-first planner proves this. K2's upstream end is cut back by
+  the stroke's sideways travel ((tooth_L + slot_extra)·cos φ + 0.5 mm), so it
+  can go in last; masonry calls this the closer.
+- Base cells are oriented to match whatever sits on them in course 0.
+
+Results (simulated, uncalibrated contact):
+
+- **Perfect placement:** a 6×6 ring 4 courses tall assembles **32/32
+  seated**. See `runs/ring-ideal/assembly.mp4` and `final.png`, and the part
+  STL/STEP files in `runs/ring-ideal/part_*`.
+- **Coarse placement (σ 4 mm, tilt 3°, μ 0.35):** runs get 3–10 bricks in
+  before one jams and knocks a neighbour. Almost every first failure is a
+  straight landing 4–11 mm off across the wall's depth with about 10° of
+  roll. That is the 2.5D brick's limited Y capture (±3 mm flat band, 30°
+  sides), the same weakness behind its 70–80% single-drop rate. The ring
+  geometry itself isn't the problem.
+
+Commands:
+
+```bash
+uv run brixzle ring --ideal --export --video --out runs/ring
+uv run brixzle ring --n 8 --courses 6 --seed 2 --keep-going --out runs/ring-noisy
+```
+
+Next steps:
+
+- Give straights and turns a deeper Y gutter, or use the 3D project's square
+  funnels on the cells: they captured about 95% of coarse drops.
+- Add T and X junction pieces built from the same cells for interior walls (rooms).

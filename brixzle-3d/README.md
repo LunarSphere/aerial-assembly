@@ -86,3 +86,21 @@ In drop trials they match the L's success rate but weigh 25–30% more.
 - Noisy multi-brick success (0.76–0.91 per brick) is the main gap: light
   receiving bricks get knocked by impacts.
 - Fork release and dome trials are not simulated yet.
+
+## First NSGA-III run (21 × 8, `runs/nsga`, pick in `configs/nsga-chosen.json`)
+
+Fitness: drops at μ 0.2/0.5, ideal pillar and overhang, noisy column. The pick
+is a smaller and lighter L: U = 20.3, H = 11.5, θ = 43°, lean 17°, infill
+10%, **7.5 g**. Re-validated against v1 with the full trials:
+
+| Trial | v1 (11.7 g) | NSGA pick (7.5 g) |
+|---|---|---|
+| Drop seated, μ 0.2 / 0.35 / 0.5 | 0.95 / 0.95 / 0.95 | 0.84 / 0.84 / 0.86 (6/64 land in the wrong cell) |
+| Ideal pillar, column, wall | all complete | all complete |
+| Ideal overhang | 4 | 4 |
+| Noisy per-brick: column / wall / pillar | 0.91 / 0.76 / 0.33 | 0.91 / 0.71 / 0.38 |
+
+It trades about 10 points of drop capture for 36% less mass. A smaller cell
+means a smaller funnel, so the 4 mm placement error more often reaches the
+neighbouring cell. Keep v1 unless mass matters most; the weights in
+`configs/nsga.json` set this trade.
