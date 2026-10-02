@@ -33,8 +33,14 @@ def parked_position(j):
     return np.array([1.0 + 0.2*j, 1.0, PARK_Z])
 
 
-def build_scene(p: BrickParams, brick, bases, n_bricks, physics: Physics, visual=True):
-    """Return (model, xml, info). ``bases`` are [(v0, v1)] voxel ranges."""
+def build_scene(p: BrickParams, brick, bases, n_bricks, physics: Physics, visual=True, body_parts=None):
+    """Return (model, xml, info). ``bases`` are [(v0, v1[, direction])] voxel ranges.
+
+    ``brick`` is one bundle or {part: bundle}; ``body_parts`` names the part of
+    each pooled body (default: all 'A').
+    """
+    bundles = brick if 'collision' not in brick else {'A': brick}
+    body_parts = list(body_parts or ['A']*n_bricks)
     root = ET.Element('mujoco', model='brixzle')
     ET.SubElement(root, 'compiler', angle='radian', inertiafromgeom='false')
     ET.SubElement(root, 'size', memory='256M')
@@ -53,8 +59,9 @@ def build_scene(p: BrickParams, brick, bases, n_bricks, physics: Physics, visual
     ET.SubElement(world, 'light', pos='0 -0.5 1.0', dir='0 0.4 -1', directional='true')
     base_bundles = []
     floor_z = 0.
-    for i, (v0, v1) in enumerate(bases):
-        base = build_base(p, v1 - v0)
+    for i, spec in enumerate(bases):
+        v0, v1 = spec[:2]
+        base = build_base(p, v1 - v0, direction=spec[2] if len(spec) > 2 else 1)
         base_bundles.append(base)
         floor_z = min(floor_z, base['outer'].bounds[1])
         for j, piece in enumerate(base['collision']):
@@ -64,25 +71,28 @@ def build_scene(p: BrickParams, brick, bases, n_bricks, physics: Physics, visual
                           contype='1', conaffinity='1')
     ET.SubElement(world, 'geom', name='floor', type='plane', size='3 3 .01',
                   pos=f'0 0 {floor_z*MM - 0.0005}', rgba='.2 .22 .25 1', contype='1', conaffinity='1')
-    for j, piece in enumerate(brick['collision']):
-        _mesh(asset, f'brick_col_{j}', piece)
-    if visual and 'mesh' in brick:
-        _mesh(asset, 'brick_vis', brick['mesh'].vertices, brick['mesh'].faces)
-    mass = brick['mass_g']*1e-3
-    com = np.asarray(brick['com'])*MM
-    I = np.asarray(brick['inertia'])*1e-9 if 'inertia' in brick else np.diag([1e-6]*3)
+    for name, bundle in bundles.items():
+        for j, piece in enumerate(bundle['collision']):
+            _mesh(asset, f'{name}_col_{j}', piece)
+        if visual and 'mesh' in bundle:
+            _mesh(asset, f'{name}_vis', bundle['mesh'].vertices, bundle['mesh'].faces)
     for j in range(n_bricks):
+        name = body_parts[j]
+        bundle = bundles[name]
+        mass = bundle['mass_g']*1e-3
+        com = np.asarray(bundle['com'])*MM
+        I = np.asarray(bundle['inertia'])*1e-9 if 'inertia' in bundle else np.diag([1e-6]*3)
         body = ET.SubElement(world, 'body', name=f'brick{j}', pos=_numbers(parked_position(j)),
                              gravcomp='1')
         ET.SubElement(body, 'freejoint', name=f'brick{j}_free')
         ET.SubElement(body, 'inertial', mass=str(mass), pos=_numbers(com),
                       fullinertia=_numbers([I[0, 0], I[1, 1], I[2, 2], I[0, 1], I[0, 2], I[1, 2]]))
-        for k in range(len(brick['collision'])):
-            ET.SubElement(body, 'geom', name=f'brick{j}_c{k}', type='mesh', mesh=f'brick_col_{k}',
+        for k in range(len(bundle['collision'])):
+            ET.SubElement(body, 'geom', name=f'brick{j}_c{k}', type='mesh', mesh=f'{name}_col_{k}',
                           group='3', rgba='.3 .6 .9 .4', contype='1', conaffinity='1')
-        if visual and 'mesh' in brick:
-            rgba = '.95 .55 .15 1' if j % 2 else '.25 .55 .85 1'
-            ET.SubElement(body, 'geom', name=f'brick{j}_vis', type='mesh', mesh='brick_vis',
+        if visual and 'mesh' in bundle:
+            rgba = '.95 .55 .15 1' if (name == 'B' if len(bundles) > 1 else j % 2) else '.25 .55 .85 1'
+            ET.SubElement(body, 'geom', name=f'brick{j}_vis', type='mesh', mesh=f'{name}_vis',
                           group='2', rgba=rgba, contype='0', conaffinity='0', mass='0')
     xml = ET.tostring(root, encoding='unicode')
     model = mujoco.MjModel.from_xml_string(xml)

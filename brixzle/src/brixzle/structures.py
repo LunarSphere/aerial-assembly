@@ -21,7 +21,7 @@ def overhang(n, direction=1):
     if direction > 0:
         bricks, base = [Placement(k, k) for k in range(n)], (-1, 2)
     else:
-        bricks, base = [Placement(k, -k) for k in range(n)], (0, 3)
+        bricks, base = [Placement(k, -k, -1) for k in range(n)], (0, 3, -1)
     return Structure(f'overhang{"+" if direction > 0 else "-"}{n}', bricks, bases=[base])
 
 
@@ -50,6 +50,8 @@ CATALOG = {
     'tower': lambda: tower(6),
     'overhang+': lambda: overhang(12, +1),
     'overhang-': lambda: overhang(12, -1),
+    'overhang+20': lambda: overhang(20, +1),
+    'overhang-20': lambda: overhang(20, -1),
     'wall': lambda: wall(3, 4),
     'bridge': lambda: bridge(3),
 }

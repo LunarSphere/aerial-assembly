@@ -47,17 +47,28 @@ def breakpoints(p: BrickParams, x0, x1, mirrored=False):
     return np.array(sorted(xs))
 
 
-def interface(p: BrickParams, mirrored):
+def interface(p: BrickParams, mirrored, reversed=False):
     """Slot/tooth geometry for a sawtooth surface.
 
     Returns (valley u within voxel, axis d pointing into the lower body, normal n
-    toward the long-ramp side, long-ramp direction r pointing up from the valley).
+    toward the slot's open side, mouth edge direction r pointing up from the
+    valley along the face the mouth chamfer cuts).
+
+    Normally the slot follows the steep face (its far wall continues it) and
+    the mouth chamfer cuts the long ramp. ``reversed`` mirrors the axis about
+    vertical: the slot then leans under the steep face with its back wall just
+    above the long ramp (inside the nesting cone while alpha <= 90 - theta),
+    and the chamfer cuts the steep face instead. Used by the 'ab' brick pair so
+    every tooth leans against the build direction.
     """
     if not mirrored:   # T: long ramp left of valley, steep face to the right
-        d, n, r = -_unit(p.phi), _unit(90 + p.phi), _unit(180 - p.theta)
-        return p.valley_u, d, n, r
-    d, n, r = _unit(-p.phi), _unit(90 - p.phi), _unit(p.theta)
-    return p.U - p.valley_u, d, n, r
+        u, d, n, r, steep = p.valley_u, -_unit(p.phi), _unit(90 + p.phi), _unit(180 - p.theta), _unit(p.phi)
+    else:
+        u, d, n, r, steep = p.U - p.valley_u, _unit(-p.phi), _unit(90 - p.phi), _unit(p.theta), _unit(180 - p.phi)
+    if reversed:
+        flip = np.array([-1., 1.])
+        return u, d*flip, n*flip, steep
+    return u, d, n, r
 
 
 def _quad(origin, a, b, ta, tb):
@@ -71,14 +82,14 @@ def tooth_width(p: BrickParams, t):
     return p.tooth_w - p.tooth_taper*np.clip(t, 0., None)/p.tooth_L
 
 
-def slot(p: BrickParams, valley, mirrored):
+def slot(p: BrickParams, valley, mirrored, reversed=False):
     """Tapered slot below a valley (profile coordinates of the valley point).
 
     The far wall continues the steep face; the near wall follows the tooth
     taper offset by the seat gap 2*clearance, so a seated tooth is held with
     small play while the entry gap is taper + 2*clearance.
     """
-    _, d, n, r = interface(p, mirrored)
+    _, d, n, r = interface(p, mirrored, reversed)
     gap = 2*p.clearance
     depth = p.tooth_L + p.slot_extra
     reach = (p.amplitude + p.H0)/math.sin(math.radians(p.phi)) + 1
@@ -95,9 +106,9 @@ def slot(p: BrickParams, valley, mirrored):
     return unary_union([cut, mouth])
 
 
-def tooth(p: BrickParams, keel, mirrored):
+def tooth(p: BrickParams, keel, mirrored, reversed=False):
     """Tapered tooth hanging from a keel point; mirrored is the sawtooth it must enter."""
-    _, d, n, _ = interface(p, mirrored)
+    _, d, n, _ = interface(p, mirrored, reversed)
     w, L = p.tooth_w, p.tooth_L
     w_tip = tooth_width(p, L)
     ch = min(p.tip_chamfer, 0.45*w_tip, 0.45*L)
@@ -116,26 +127,36 @@ def _strip(p: BrickParams, x0, x1, top_mirrored, bottom_mirrored, bottom_offset)
     return Polygon(np.vstack([top, bottom[::-1]]))
 
 
-def brick_parts(p: BrickParams):
-    """A-orientation outer profile (no internal holes) and its feature list.
+def brick_parts(p: BrickParams, part='A'):
+    """Outer profile (no internal holes) and feature list of a brick part.
 
-    In 'alternate' mode the bottom is the mirrored sawtooth (teeth lean
-    opposite to the top slots, forcing ABA courses). In 'uniform' mode the
-    bottom repeats the top (constant-thickness chevron; every tooth leans
-    the same way, so every joint hooks against the same overhang direction).
+    'alternate': the A part; the bottom is the mirrored sawtooth (teeth lean
+    opposite to the top slots, forcing ABA courses; B = A rotated 180 deg).
+    'uniform': the bottom repeats the top (constant-thickness chevron; every
+    tooth leans the same way).
+    'ab': two distinct parts on the alternating body, both world-aligned. A has
+    bottom T' with reversed teeth and top T with normal slots; B has bottom T
+    with normal teeth and top T' with reversed slots. Every tooth tip trails
+    toward -x, so every joint hooks against a +x overhang.
     """
-    bottom_m = not p.uniform
     U, H0 = p.U, p.H0
+    if p.lean_mode == 'ab' and part == 'B':
+        top_m, bottom_m, top_rev, bottom_rev = True, False, True, False
+    elif p.lean_mode == 'ab':
+        top_m, bottom_m, top_rev, bottom_rev = False, True, False, True
+    else:
+        top_m, bottom_m, top_rev, bottom_rev = False, not p.uniform, False, False
     # Vertical ends through the coincident top/bottom peaks: the thinnest
     # section (H0). Course neighbours tile by translation; the order planner
     # keeps the slanted final approach clear of already placed neighbours.
-    body = _strip(p, -U + p.end_gap/2, U - p.end_gap/2, top_mirrored=False,
+    body = _strip(p, -U + p.end_gap/2, U - p.end_gap/2, top_mirrored=top_m,
                   bottom_mirrored=bottom_m, bottom_offset=0.)
     keel_u = U - p.valley_u if bottom_m else p.valley_u
+    valley_u = U - p.valley_u if top_m else p.valley_u
     keels = [np.array([xl + keel_u, 0.]) for xl in (-U, 0.)]
-    valleys = [np.array([xl + p.valley_u, H0]) for xl in (-U, 0.)]
-    teeth = [tooth(p, k, mirrored=bottom_m) for k in keels]
-    slots = [slot(p, v, mirrored=False) for v in valleys]
+    valleys = [np.array([xl + valley_u, H0]) for xl in (-U, 0.)]
+    teeth = [tooth(p, k, mirrored=bottom_m, reversed=bottom_rev) for k in keels]
+    slots = [slot(p, v, mirrored=top_m, reversed=top_rev) for v in valleys]
     outer = unary_union([body, *teeth]).difference(unary_union(slots))
     # Opening removes zero-width spikes left where cuts graze the steep faces.
     outer = outer.buffer(-0.01, join_style=2).buffer(0.01, join_style=2)
@@ -234,8 +255,12 @@ def lightening_holes(p: BrickParams, parts=None, channels=None):
     return holes
 
 
-def base_outer(p: BrickParams, voxels, thickness=6.0):
-    """Anchored base: top matches an A brick's bottom, with slots; flat bottom."""
+def base_outer(p: BrickParams, voxels, thickness=6.0, direction=1):
+    """Anchored base: top matches a course-0 brick's bottom, with slots; flat bottom.
+
+    In 'ab' mode the slots lean against the build ``direction`` (reversed for +x,
+    normal for -x, which receives a rotated B part).
+    """
     m = not p.uniform
     x0, x1 = 0., voxels*p.U
     xs = breakpoints(p, x0, x1, mirrored=m)
@@ -243,7 +268,7 @@ def base_outer(p: BrickParams, voxels, thickness=6.0):
     body = Polygon(np.vstack([top, [[x1, -thickness], [x0, -thickness]]]))
     vu = p.U - p.valley_u if m else p.valley_u
     valleys = [np.array([i*p.U + vu, 0.]) for i in range(voxels)]
-    cuts = unary_union([slot(p, v, mirrored=m) for v in valleys])
+    cuts = unary_union([slot(p, v, mirrored=m, reversed=p.lean_mode == 'ab' and direction > 0) for v in valleys])
     return _largest(body.difference(cuts)), valleys
 
 

@@ -30,7 +30,7 @@ class BrickParams:
     end_gap: float = 0.3        # gap between neighbours in a course
     wall: float = 1.2           # minimum wall/rib thickness for lightening holes
     lighten: bool = True        # cut through-Y lightening holes
-    lean_mode: str = 'alternate'  # 'alternate': ABA courses (B = A rotated); 'uniform': every course A
+    lean_mode: str = 'alternate'  # 'alternate': B = A rotated; 'uniform': every course A; 'ab': distinct A/B parts, all teeth trail -x
     fork_d: float = 2.0         # fork tine (rod) diameter
     fork_clearance: float = 0.3 # radial clearance around each tine
     infill: float = 1.0         # printed mass fraction relative to solid

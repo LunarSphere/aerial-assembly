@@ -125,3 +125,57 @@ and shorter teeth (5.3 mm). Re-validated with the current code against V0:
 Neither design dominates. This run used a small noisy fitness (24 drops per
 friction, one structure seed) and the earlier narrow bases. Before trusting a
 pick, rerun it with more samples and seeds.
+
+## A/B brick pair: pegs leaning against the build direction (`lean_mode: "ab"`)
+
+Idea: keep the alternating sawtooth body, but use a distinct **type-B brick**
+so every course's teeth lean opposite to the build direction. Every joint then
+hooks against the overhang rotation. In `alternate` mode B is just A rotated,
+so only every other joint hooks.
+
+- **A** (even courses): bottom T′ with *reversed* teeth, top T with normal slots.
+- **B** (odd courses): bottom T with normal teeth, top T′ with *reversed* slots.
+- A reversed interface mirrors the slot axis about vertical. It stays inside
+  the nesting cone while α ≤ 90 − θ (the existing `nest_cone` rule).
+- **−x builds use the same two parts rotated 180°.** `Placement(direction=-1)`
+  handles this, and the base's slots follow the build direction.
+
+Configs: `configs/ab.json` (V0 fit) and `configs/ab-tight.json`
+(clearance 0.05). Commands: `brixzle export --part B`, `brixzle drop --part B`
+(drops B onto a seated A), and `brixzle assemble ... --track` (aim at the
+supporter's measured pose, as a global camera would allow).
+
+Single-brick staircase, 20 requested (simulated, uncalibrated contact):
+
+| Mode | Fit (clearance) | Ideal aim | Camera-tracked aim |
+|---|---|---|---|
+| alternate | 0.3 | 4 | 4 (falls) |
+| alternate | 0.05 | 4 | 6 |
+| uniform | 0.05 | 8 | 10 |
+| **ab** | 0.3 | 5 (5 also for −x) | 6 |
+| **ab** | 0.05 | 8 (9 with stiffer contact) | **10–11**, still standing |
+
+Other `ab` results:
+
+- **Drops:** A onto the base seats 92/75/69%, and B onto A 92/73/71%, at
+  μ = 0.2/0.35/0.5. That is the same as `alternate`, so the reversed lean
+  costs nothing. The tight fit drops to 52–56% at μ = 0.35.
+
+What limits it:
+
+1. **The hooks hold.** Seated bricks stay within 0.2° of their supporter.
+   The stack instead accumulates sag (joint play plus contact compliance
+   under an n² moment). In tracked runs the stop is the H0/2 sag criterion,
+   not a fall.
+2. **Placing a cantilevered brick is the real bottleneck.** With ideal aim,
+   brick 9 lands level on a supporter that has sagged 5 mm and pitched 3°,
+   so it tips before hooking. Tracking the measured pose fixes this.
+3. **Coarse placement onto a cantilever still fails.** Seated: 1–2 bricks
+   with the full error model (`--track --exact-courses 1`). Tilt (3°) and
+   drop height are tolerated, but more than about 1 mm of XY error, or
+   residual velocity, tips the one-tooth brick before it catches. Aim bias
+   in either direction doesn't help.
+
+Next: a capture feature for the hanging voxel (for example a downward guide
+lip that engages the supporter's front ramp before the COM leaves support),
+or a place-then-push strategy for cantilever bricks.

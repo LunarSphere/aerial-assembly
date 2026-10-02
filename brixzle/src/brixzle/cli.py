@@ -32,7 +32,8 @@ def _new_dir(out):
 
 def _trial_config(args):
     physics = Physics(timestep=args.timestep, friction=args.mu, contact_timeconst=args.timeconst, iterations=50)
-    error = T.ErrorModel(ideal=getattr(args, 'ideal', False))
+    error = T.ErrorModel(ideal=getattr(args, 'ideal', False), track_supporter=getattr(args, 'track', False),
+                         exact_courses=getattr(args, 'exact_courses', 0))
     if getattr(args, 'sigma', None) is not None:
         error = replace(error, sigma_xy=args.sigma)
     return T.TrialConfig(physics=physics, error=error)
@@ -59,8 +60,11 @@ def _plot_profile(p, bundle, out):
     base, _ = pr.base_outer(p, 5, p.tooth_L + p.slot_extra + 4)
     draw(ax[1], base, color='0.6')
     for k, starts in enumerate([[0, 2], [1, 3], [0, 2], [1]]):
-        flip = k % 2 and not p.uniform
-        g = pr.mirror_x(bundle['outer']) if flip else bundle['outer']
+        if p.lean_mode == 'ab':
+            g = bundle['outer'] if k % 2 == 0 else pr.brick_parts(p, 'B')['outer']
+        else:
+            flip = k % 2 and not p.uniform
+            g = pr.mirror_x(bundle['outer']) if flip else bundle['outer']
         for i0 in starts:
             draw(ax[1], affinity.translate(g, (i0 + 1)*p.U, k*p.H0), color=['tab:blue', 'tab:orange'][k % 2], alpha=.85)
     ax[1].set_title('running bond on anchored base')
@@ -75,7 +79,7 @@ def _plot_profile(p, bundle, out):
 def cmd_export(args):
     p = load_params(args.params)
     out = _new_dir(args.out)
-    bundle = cad.build_brick(p)
+    bundle = cad.build_brick(p, part=args.part)
     cad.export(bundle, out)
     margins = R.rules(p, bundle)
     write_json(out/'params.json', p.to_dict())
@@ -93,7 +97,7 @@ def cmd_export(args):
 
 def cmd_rules(args):
     p = load_params(args.params)
-    margins = R.rules(p, cad.build_brick(p, solid=False))
+    margins = R.rules(p, cad.build_brick(p, solid=False, part=args.part))
     for k, v in margins.items():
         print(f'{"ok " if v >= 0 else "FAIL"} {k:24s} {v:9.2f}')
 
@@ -101,10 +105,12 @@ def cmd_rules(args):
 def cmd_drop(args):
     p = load_params(args.params)
     out = _new_dir(args.out)
-    bundle = cad.build_brick(p)
+    bundles = cad.build_bricks(p)
+    bundle = bundles[args.part]
     cfg = _trial_config(args)
-    rows, xml = T.drop_trials(p, bundle, cfg, samples=args.samples, seed=args.seed, record=args.video > 0)
-    sweep, _ = T.drop_trials(p, bundle, cfg, offsets=np.arange(-p.U/2 - 4, p.U/2 + 4.1, 1.0))
+    rows, xml = T.drop_trials(p, bundles, cfg, samples=args.samples, seed=args.seed, record=args.video > 0,
+                              part=args.part)
+    sweep, _ = T.drop_trials(p, bundles, cfg, offsets=np.arange(-p.U/2 - 4, p.U/2 + 4.1, 1.0), part=args.part)
     summary = T.summarize_drops(rows)
     seated = [abs(r['dx']) for r in sweep if r['outcome'] == 'seated']
     ok = [r['dx'] for r in sweep if r['outcome'] == 'seated']
@@ -129,7 +135,7 @@ def cmd_drop(args):
 def cmd_assemble(args):
     p = load_params(args.params)
     out = _new_dir(args.out)
-    bundle = cad.build_brick(p)
+    bundle = cad.build_bricks(p)
     if args.structure not in S.CATALOG:
         sys.exit(f'Unknown structure; choose from {sorted(S.CATALOG)}')
     structure = S.CATALOG[args.structure]()
@@ -149,7 +155,7 @@ def cmd_assemble(args):
 
 def cmd_push(args):
     p = load_params(args.params)
-    bundle = cad.build_brick(p)
+    bundle = cad.build_bricks(p)
     res = T.push_test(p, bundle, S.tower(args.height), _trial_config(args))
     print(json.dumps(res))
 
@@ -188,21 +194,26 @@ def parser():
 
     sp = sub.add_parser('export', help='CAD solid, STL/STEP, profile plot, rule margins')
     sp.add_argument('--params')
+    sp.add_argument('--part', choices=['A', 'B'], default='A', help="'ab' lean mode has two parts")
     sp.add_argument('--out', required=True)
     sp.set_defaults(func=cmd_export)
     sp = sub.add_parser('rules', help='print analytic design-rule margins')
     sp.add_argument('--params')
+    sp.add_argument('--part', choices=['A', 'B'], default='A')
     sp.set_defaults(func=cmd_rules)
     sp = sub.add_parser('drop', help='Monte Carlo coarse-placement drops + capture sweep')
     common(sp)
     sp.add_argument('--samples', type=int, default=64)
     sp.add_argument('--ideal', action='store_true')
+    sp.add_argument('--part', choices=['A', 'B'], default='A', help="B drops onto a seated A ('ab' mode)")
     sp.add_argument('--video', type=int, default=0, help='render up to N failed drops (plus drop 0)')
     sp.set_defaults(func=cmd_drop)
     sp = sub.add_parser('assemble', help='sequential assembly of a catalog structure')
     sp.add_argument('structure')
     common(sp)
     sp.add_argument('--ideal', action='store_true', help='no placement error (aim bias only)')
+    sp.add_argument('--track', action='store_true', help='aim at the measured supporter pose (global camera)')
+    sp.add_argument('--exact-courses', type=int, default=0, help='place courses below this without error')
     sp.add_argument('--keep-going', action='store_true')
     sp.add_argument('--video', action='store_true')
     sp.set_defaults(func=cmd_assemble)

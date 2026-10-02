@@ -29,6 +29,10 @@ class ErrorModel:
     clearance: tuple = (5., 30.)  # mm above the highest-reach release height
     sigma_vel: float = 0.03      # m/s residual velocity
     ideal: bool = False
+    # Aim at the seat implied by the supporter's *measured* pose (global camera)
+    # instead of the ideal lattice pose; matters once a cantilever sags.
+    track_supporter: bool = False
+    exact_courses: int = 0       # courses below this are placed without error (anchored start)
 
     def sample(self, rng):
         if self.ideal:
@@ -62,9 +66,13 @@ class TrialConfig:
     tolerance: Tolerance = field(default_factory=Tolerance)
 
 
-def release_pose(p: BrickParams, placement, sample):
-    """Seat pose displaced by the sampled error, lifted so nothing overlaps at release."""
-    pos, quat = L.pose(p, placement)
+def release_pose(p: BrickParams, placement, sample, seat_pose=None):
+    """Seat pose displaced by the sampled error, lifted so nothing overlaps at release.
+
+    ``seat_pose`` (pos, quat) overrides the ideal lattice seat, e.g. the seat
+    implied by a sagging supporter's measured pose.
+    """
+    pos, quat = seat_pose if seat_pose is not None else L.pose(p, placement)
     d = L.insertion_axis(p, placement)
     side = -np.sign(d[0])  # the stroke arrives from this x side
     lift = p.amplitude + p.tooth_L + p.slot_extra + sample['clear']
@@ -77,6 +85,17 @@ def release_pose(p: BrickParams, placement, sample):
 
 def _rot(q):
     return Rotation.from_quat([q[1], q[2], q[3], q[0]])
+
+
+def expected_seat(p, data, info, placement, ref):
+    """Seat of ``placement`` carried along with supporter ref=(k, placement_k)'s actual pose."""
+    k, rp = ref
+    tpos, tquat = L.pose(p, placement)
+    rpos, rquat = body_pose(data, info, k)
+    ipos, iquat = L.pose(p, rp)
+    delta = _rot(rquat)*_rot(iquat).inv()
+    q = (delta*_rot(tquat)).as_quat()
+    return rpos + delta.apply(tpos - ipos), np.array([q[3], q[0], q[1], q[2]])
 
 
 def pose_error(p, data, info, j, placement, ref=None):
@@ -163,29 +182,54 @@ def run_until_settled(model, data, info, j, tol: Tolerance, owner, watch=(), fra
             'time': (still_since if settled else data.time) - t0, 'settled': settled}
 
 
-def drop_trials(p: BrickParams, brick, cfg: TrialConfig, samples=32, seed=0, offsets=None, record=False):
-    """Drop one A brick onto an anchored base at voxel 1; Monte Carlo over the error model.
+def _bundles(brick):
+    return {'A': brick} if 'collision' in brick else brick
 
+
+def _outers(bundles):
+    return {k: v['outer'] for k, v in bundles.items()}
+
+
+def drop_trials(p: BrickParams, brick, cfg: TrialConfig, samples=32, seed=0, offsets=None, record=False,
+                part='A'):
+    """Drop one brick and judge its seat; Monte Carlo over the error model.
+
+    part 'A': an A brick onto an anchored base at voxel 1. part 'B' ('ab' mode):
+    a B brick onto an ideally seated A (B never lands on the base).
     ``offsets`` instead runs a deterministic capture sweep over X offsets (mm).
     """
-    model, xml, info = build_scene(p, brick, [(0, 4)], 1, cfg.physics, visual=record)
+    bundles = _bundles(brick)
+    if part == 'B':
+        support, target = L.Placement(0, 1), L.Placement(1, 1)
+        body_parts, j = ['A', 'B'], 1
+    else:
+        support, target = None, L.Placement(0, 1)
+        body_parts, j = ['A'], 0
+    model, xml, info = build_scene(p, bundles, [(0, 4)], len(body_parts), cfg.physics, visual=record,
+                                   body_parts=body_parts)
     data = mujoco.MjData(model)
     owner = _brick_geoms(model, info)
-    target = L.Placement(0, 1)
     rng = np.random.default_rng(seed)
     rows = []
     runs = offsets if offsets is not None else range(samples)
     for item in runs:
         mujoco.mj_resetData(model, data)
+        if support is not None:
+            spos, squat = L.pose(p, support)
+            activate(model, data, info, 0, spos, squat)
+            ideal = Tolerance(max_time=0.3)
+            run_until_settled(model, data, info, 0, ideal, owner)
         sample = cfg.error.sample(rng)
         if offsets is not None:
             sample = dict(sample, dx=float(item), dy=0., yaw=0., roll=0., pitch=0., vel=[0, 0, 0],
                           clear=cfg.error.clearance[0])
         pos, quat = release_pose(p, target, sample)
-        activate(model, data, info, 0, pos, quat, linvel=sample['vel'])
+        activate(model, data, info, j, pos, quat, linvel=sample['vel'])
         frames = [] if record else None
-        m = run_until_settled(model, data, info, 0, cfg.tolerance, owner, frames=frames)
-        err, angle = pose_error(p, data, info, 0, target)
+        m = run_until_settled(model, data, info, j, cfg.tolerance, owner, frames=frames,
+                              watch=range(j))
+        ref = (0, support) if support is not None else None
+        err, angle = pose_error(p, data, info, j, target, ref)
         outcome = classify(p, err, angle, cfg.tolerance, m['floor'])
         rows.append({**sample, **m, 'outcome': outcome, 'err_mm': err.tolist(), 'angle_deg': angle})
         if record:
@@ -233,11 +277,12 @@ def assemble(p: BrickParams, brick, structure, cfg: TrialConfig, seed=0, stop_on
     ``tolerance.drift``), floor contact, or cumulative sag beyond half a course.
     ``record`` optionally receives qpos frames for every stage.
     """
-    order = L.assembly_order(p, structure, brick['outer'])
+    bundles = _bundles(brick)
+    order = L.assembly_order(p, structure, _outers(bundles))
     graph = L.connectivity(structure)
     index = {b.name: j for j, b in enumerate(order)}
-    model, xml, info = build_scene(p, brick, structure.bases, len(order), cfg.physics,
-                                   visual=record is not None)
+    model, xml, info = build_scene(p, bundles, structure.bases, len(order), cfg.physics,
+                                   visual=record is not None, body_parts=[L.part(p, b) for b in order])
     data = mujoco.MjData(model)
     owner = _brick_geoms(model, info)
     rng = np.random.default_rng(seed)
@@ -246,11 +291,14 @@ def assemble(p: BrickParams, brick, structure, cfg: TrialConfig, seed=0, stop_on
     for j, b in enumerate(order):
         before = [body_pose(data, info, i) for i in range(j)]
         sample = cfg.error.sample(rng)
-        pos, quat = release_pose(p, b, sample)
-        activate(model, data, info, j, pos, quat, linvel=sample['vel'])
-        m = run_until_settled(model, data, info, j, cfg.tolerance, owner, watch=range(j), frames=record)
+        if b.course < cfg.error.exact_courses:
+            sample = dict(dx=0., dy=0., yaw=0., roll=0., pitch=0., clear=cfg.error.clearance[0], vel=[0., 0., 0.])
         supporters = [u for u in graph.predecessors(b.name) if u in index]
         ref = (index[supporters[0]], order[index[supporters[0]]]) if supporters else None
+        seat = expected_seat(p, data, info, b, ref) if cfg.error.track_supporter and ref else None
+        pos, quat = release_pose(p, b, sample, seat)
+        activate(model, data, info, j, pos, quat, linvel=sample['vel'])
+        m = run_until_settled(model, data, info, j, cfg.tolerance, owner, watch=range(j), frames=record)
         err, angle = pose_error(p, data, info, j, b, ref)
         outcome = classify(p, err, angle, cfg.tolerance, m['floor'])
         moved, sag = 0., 0.
@@ -282,8 +330,7 @@ def push_test(p, brick, structure, cfg: TrialConfig, rate=0.2, limit=3.0, direct
     result, (model, data, info, _) = assemble(p, brick, structure, ideal)
     if result['status'] != 'complete':
         return {'break_force_N': 0., 'status': result['status']}
-    order = L.assembly_order(p, structure, brick['outer'])
-    top = len(order) - 1
+    top = result['total'] - 1
     start, _ = body_pose(data, info, top)
     body = info['bodies'][top]
     f = 0.
