@@ -1,0 +1,23 @@
+{
+  "U": 25.0,
+  "D": 25.0,
+  "H0": 15.0,
+  "theta": 50.0,
+  "alpha": 38.0,
+  "gutter": 30.0,
+  "gutter_flat": 3.0,
+  "tooth_w": 5.0,
+  "tooth_L": 6.5,
+  "tip_chamfer": 1.5,
+  "tooth_taper": 2.0,
+  "clearance": 0.05,
+  "slot_extra": 1.0,
+  "mouth_chamfer": 1.5,
+  "end_gap": 0.3,
+  "wall": 1.2,
+  "lighten": true,
+  "lean_mode": "ab",
+  "fork_d": 2.0,
+  "fork_clearance": 0.3,
+  "infill": 1.0
+}
