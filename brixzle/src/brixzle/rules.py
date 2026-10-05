@@ -65,6 +65,17 @@ def rules(p: BrickParams, bundle, s: RuleSettings = RuleSettings()):
     shear_area = p.tooth_w*p.D*0.6  # mm^2, gutter-reduced effective depth
     load = s.load_factor*bundle['mass_g']*1e-3*9.81  # N
     out['tooth_strength'] = shear_area*s.pla_shear_mpa - load
+    # Concept features (inactive genes report a positive margin).
+    cos_a = math.cos(math.radians(p.alpha))
+    if p.lip_L > 0:
+        # Material between the top lip slot and the lip root below it, and a printable lip tip.
+        out['lip_web'] = p.H0 - (p.lip_L + p.slot_extra)*cos_a - s.min_feature
+        out['lip_printable'] = 0.7*p.lip_w - s.min_feature
+    else:
+        out['lip_web'] = out['lip_printable'] = 1.
+    # Barb must fit on the tooth and stay small enough that a printed flank can deflect past it.
+    out['barb_fits'] = (min(p.tooth_L - p.tip_chamfer - 0.5 - p.barb_len, 1.5 - p.barb_h)
+                        if p.barb_h > 0 else 1.)
     # Passive fork: two bores exist and the brick hangs below them.
     if bundle['channels']:
         z_tine = bundle['channels'][0][1]

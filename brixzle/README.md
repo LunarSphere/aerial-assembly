@@ -272,3 +272,35 @@ uv run brixzle baseplate --params configs/nsga-span-chosen.json --n 4 --out runs
 
 `baseplate.py` sweeps `profile.base_outer` through the brick's Y gutter for each of the n rows, fuses
 them, and cuts the bottom flat. The STL spans n·U × n·D and is watertight (`tests/test_baseplate.py`).
+
+## Concept genes and multi-parent search (`configs/nsga-concepts.json`)
+
+Three new brick concepts, each a gene where 0 gives the original brick (`params.CONCEPT_BOUNDS`):
+
+- **Capture lip** (`lip_L`, `lip_w`): a centre tooth under the brick's middle. Every brick centre sits
+  over a joint (overhang step, running bond) or a centre (stack bond), so each top carries a centre
+  slot and two end half-slots, and the base gets a slot at every voxel boundary.
+- **Snap barb** (`barb_h`, `barb_len`): a catch on each tooth's near flank with a pocket in the slot
+  wall. A rigid barb cannot pass the slot mouth, so it is simulated as soft contact (`barb_timeconst`,
+  uncalibrated) and kept out of the rigid outer profile.
+- **Scarfed / stepped ends** (`end_scarf`, `end_step`): the course-neighbour joint leans toward the
+  insertion axis, with a ledge one neighbour rests on. The planner check `course_insertable` rejects
+  shapes that block the vertical approach; scarfs much past 0.3 usually do.
+
+The run seeds 10 distinct parents (ab-tight, two lip variants, barb, two scarf-ledge variants, and
+thick-stiff, shallow-long, compact and loose-capture bodies), so crossover mixes concepts rather than
+near-clones. It scores tracked overhangs in both directions, an ideal 4-course bridge and a wall
+(span weight 2), and drops of A and B.
+
+Result (12 generations, early stop): no lip or barb design reached the top 30. The winner descends
+from the thick-stiff parent (`configs/ab-thick.json`: H0 19, tooth_L 8, 15.2 g). Validation
+(96 drops per case; overhang with ideal + tracked aim):
+
+| Design | Overhang +x / −x (20) | Bridge 3 | Wall 3×4 | Drops A, μ 0.2/0.35/0.5 | Drops B |
+|---|---|---|---|---|---|
+| ab-tight | 10 / 10 | 7/7 | 5/10 | 85 / 53 / 40% | 89 / 66 / 52% |
+| **ab-thick** | **11 / 11** | 7/7 | **10/10** | 80 / 54 / 54% | 82 / 62 / 49% |
+| nsga-concepts-chosen (lightest balanced) | 10 / 10 | 7/7 | 10/10 | 89 / 57 / 50% | 84 / 59 / 41% |
+
+A deeper body and longer teeth buy one more overhang brick and a completed wall at +1.2 g. The
+overhang still ends by sag, not by joints letting go.

@@ -25,7 +25,8 @@ from pymoo.util.ref_dirs import get_reference_directions
 from aerial_assembly.config import Physics
 
 from . import cad, rules as R, structures as S, trials as T
-from .params import BOUNDS, V0, BrickParams, with_vector
+from . import lattice as L, profile as pr
+from .params import BOUNDS, CONCEPT_BOUNDS, V0, BrickParams, with_vector
 
 OBJECTIVES = ['neg_p_success', 'f_max_N', 't_assembly_s', 'mass_g', 'collisions']
 # Rules whose margins are uninformative as constraints (always satisfied by bounds).
@@ -57,11 +58,15 @@ class EvalConfig:
     overhang_track: bool = False
     structures: tuple = ('wall', 'bridge')
     tower_h: int = 4
+    ideal_structures: tuple = ()  # also built with ideal (untracked) aim, one run each
+    # Extra genes beyond BOUNDS (e.g. params.CONCEPT_BOUNDS) and named parent designs to seed from.
+    genes: tuple = ()
+    parents: dict = field(default_factory=dict)  # name -> overrides on base
 
     @classmethod
     def from_dict(cls, d):
         d = dict(d)
-        for k in ('frictions', 'wall', 'structure_seeds', 'drop_parts', 'structures'):
+        for k in ('frictions', 'wall', 'structure_seeds', 'drop_parts', 'structures', 'ideal_structures', 'genes'):
             if k in d:
                 d[k] = tuple(d[k])
         return cls(**d)
@@ -82,7 +87,7 @@ def base_params(ec: EvalConfig):
 
 
 def search_bounds(names, ec: EvalConfig):
-    b = {**BOUNDS, **{k: tuple(v) for k, v in ec.bounds.items()}}
+    b = {**BOUNDS, **CONCEPT_BOUNDS, **{k: tuple(v) for k, v in ec.bounds.items()}}
     return np.array([b[n][0] for n in names]), np.array([b[n][1] for n in names])
 
 
@@ -105,6 +110,7 @@ def evaluate(p: BrickParams, ec: EvalConfig):
         return worst, {'geometry_builds': -1.}, {'error': repr(exc)}
     margins = {k: v for k, v in R.rules(p, brick).items() if k not in SKIP_RULES}
     margins['geometry_builds'] = 1.
+    margins['course_insertable'] = course_insertable(p)
     if not R.feasible(margins):
         return dict(worst, mass_g=brick['mass_g']), margins, {'skipped': 'rules', 'seconds': time.time() - t0}
     err = T.ErrorModel(**ec.error)
@@ -132,6 +138,11 @@ def evaluate(p: BrickParams, ec: EvalConfig):
                 res, _ = T.assemble(p, bricks, build[kind](), cfg, seed=seed)
                 scores[f'{kind}{seed}'] = res['stable_bricks']/res['total']
                 times += [s['time'] for s in res['stages']]
+        plain = T.TrialConfig(error=T.ErrorModel(ideal=True, aim_bias=err.aim_bias))
+        for kind in ec.ideal_structures:
+            res, _ = T.assemble(p, bricks, build[kind](), plain)
+            scores[kind] = res['stable_bricks']/res['total']
+            times += [s['time'] for s in res['stages']]
         p_success = pooled_success(scores, ec)
         obj = {'neg_p_success': -p_success, 'f_max_N': ds['f_max_N'],
                't_assembly_s': float(np.mean(times)), 'mass_g': brick['mass_g'],
@@ -141,6 +152,23 @@ def evaluate(p: BrickParams, ec: EvalConfig):
         return obj, margins, details
     except Exception:
         return dict(worst, mass_g=brick['mass_g']), margins, {'error': traceback.format_exc(limit=3)}
+
+
+def course_insertable(p: BrickParams):
+    """1 if courses with neighbours (wall, bridge) have an insertion order, else -1.
+
+    Shaped (scarfed / stepped) ends can block the vertical approach next to a placed
+    neighbour; the planner check is cheap, so infeasible ends never reach simulation.
+    """
+    if p.end_scarf <= 0 and p.end_step == 0:
+        return 1.
+    outer = {k: pr.brick_parts(p, k)['outer'] for k in (('A', 'B') if p.lean_mode == 'ab' else ('A',))}
+    try:
+        for s in (S.wall(3, 2), S.bridge(2)):
+            L.assembly_order(p, s, outer)
+    except ValueError:
+        return -1.
+    return 1.
 
 
 def _eval_job(x, names, ec_dict):
@@ -206,7 +234,7 @@ class Checkpoint(Callback):
 
 def constraint_names():
     margins = R.rules(V0, cad.build_brick(V0, solid=False))
-    return [k for k in margins if k not in SKIP_RULES] + ['geometry_builds']
+    return [k for k in margins if k not in SKIP_RULES] + ['geometry_builds', 'course_insertable']
 
 
 def select(F, weights):
@@ -224,7 +252,18 @@ def seed_population(names, size, rng, spread=0.15, ec: EvalConfig = None):
     """Base params (every lean mode) plus Gaussian perturbations: start near the educated guess."""
     ec = ec or EvalConfig()
     lo, hi = search_bounds(names, ec)
-    base = np.clip([getattr(base_params(ec), n) for n in names], lo, hi)
+    b0 = base_params(ec)
+    if ec.parents:
+        # Distinct parent designs, then perturbations of each in turn, so crossover mixes concepts.
+        centres = [np.clip([ov.get(n, getattr(b0, n)) for n in names], lo, hi) for ov in ec.parents.values()]
+        rows = [np.r_[c, rng.uniform()] for c in centres]
+        k = 0
+        while len(rows) < size:
+            c = centres[k % len(centres)]
+            rows.append(np.r_[np.clip(c + rng.normal(0, spread/3, len(names))*(hi - lo), lo, hi), rng.uniform()])
+            k += 1
+        return np.array(rows[:size])
+    base = np.clip([getattr(b0, n) for n in names], lo, hi)
     rows = [np.r_[base, (i + .5)/len(LEAN_MODES)] for i in range(len(LEAN_MODES))]
     while len(rows) < size:
         x = np.clip(base + rng.normal(0, spread, len(names))*(hi - lo), lo, hi)
@@ -236,7 +275,7 @@ def run(out, pop_size=24, generations=10, partitions=3, workers=8, seed=0, ec: E
         names=None, patience=0, min_improve=0.01):
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
-    names = list(names or BOUNDS)
+    names = list(names or BOUNDS) + [g for g in ec.genes if g not in (names or BOUNDS)]
     cons = constraint_names()
     ref_dirs = get_reference_directions('das-dennis', len(OBJECTIVES), n_partitions=partitions)
     pop_size = max(pop_size, len(ref_dirs))

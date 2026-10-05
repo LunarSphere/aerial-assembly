@@ -15,6 +15,8 @@ import trimesh
 
 from . import profile as pr
 from .convex import convex_parts
+from shapely.ops import unary_union
+from .profile import _largest
 from .params import PLA_DENSITY, BrickParams
 
 
@@ -60,19 +62,22 @@ def build_brick(p: BrickParams, solid=True, part='A'):
     channels = pr.fork_channels(p, parts)
     holes = pr.lightening_holes(p, parts, channels)
     outer = parts['outer']
-    net = outer
+    barbs = parts.get('barbs', [])
+    printed = _largest(unary_union([outer, *barbs])) if barbs else outer
+    net = printed
     for h in holes:
         net = net.difference(h)
     bundle = {
         'params': p.to_dict(), 'part': part,
         'outer': outer, 'holes': holes, 'channels': channels,
         'collision': _pieces(outer, p),
+        'soft_collision': [q for b in barbs for q in _pieces(b, p)],
         'keels': [k.tolist() for k in parts['keels']],
         'valleys': [v.tolist() for v in parts['valleys']],
         'profile_area': outer.area, 'net_area': net.area, 'fragments': parts['fragments'],
     }
     if solid:
-        shape = _swept(outer, holes, p)
+        shape = _swept(printed, holes, p)
         for x, z in channels:
             bore = cq.Solid.makeCylinder(p.fork_d/2 + p.fork_clearance, p.D + 2,
                                          cq.Vector(x, -p.D/2 - 1, z), cq.Vector(0, 1, 0))
