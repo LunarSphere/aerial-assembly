@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "brixzle"
+version = "0.1.0"
+description = "Parametric drop-assembled bricks: CadQuery geometry, MuJoCo assembly trials, NSGA-III search"
+requires-python = "==3.12.*"
+dependencies = [
+    "aerial-assembly",
+    "cadquery>=2.5",
+    "mujoco==3.13.0",
+    "numpy>=2,<3",
+    "scipy>=1.14,<2",
+    "trimesh>=4.12.2,<5",
+    "networkx>=3.3",
+    "pymoo>=0.6.1",
+    "shapely>=2.0",
+    "matplotlib>=3.8",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10"]
+video = ["pillow>=12,<13", "imageio>=2.37,<3", "imageio-ffmpeg>=0.6,<1"]
+
+[project.scripts]
+brixzle = "brixzle.cli:main"
+
+[tool.uv.sources]
+aerial-assembly = { path = "../simulation", editable = true }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
