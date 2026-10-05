@@ -47,11 +47,21 @@ class EvalConfig:
     score_weights: dict = field(default_factory=lambda: {'drop': 1., 'overhang': 1., 'wall': 1., 'bridge': 1.})
     span_weight: float = 1.0
     error: dict = field(default_factory=dict)  # overrides for trials.ErrorModel
+    # Search setup: base params (seed centre and unsearched fields), a fixed lean mode, bound overrides.
+    base: dict = field(default_factory=dict)
+    lean_mode: str = ''         # '' lets the last gene choose
+    bounds: dict = field(default_factory=dict)
+    # Trials: which parts to drop, overhang aim (tracked = aim at the supporter's measured pose),
+    # and which coarse-placement structures to run per seed.
+    drop_parts: tuple = ('A',)
+    overhang_track: bool = False
+    structures: tuple = ('wall', 'bridge')
+    tower_h: int = 4
 
     @classmethod
     def from_dict(cls, d):
         d = dict(d)
-        for k in ('frictions', 'wall', 'structure_seeds'):
+        for k in ('frictions', 'wall', 'structure_seeds', 'drop_parts', 'structures'):
             if k in d:
                 d[k] = tuple(d[k])
         return cls(**d)
@@ -67,10 +77,21 @@ def pooled_success(scores, ec):
     return float(total/weight)
 
 
-def decode(x, names):
-    """Continuous vector -> BrickParams; the last gene picks the lean mode (thirds of [0, 1])."""
-    p = with_vector(V0, names, x[:-1])
-    return replace(p, lean_mode=LEAN_MODES[min(int(x[-1]*len(LEAN_MODES)), len(LEAN_MODES) - 1)])
+def base_params(ec: EvalConfig):
+    return BrickParams.from_dict({**V0.to_dict(), **ec.base}) if ec.base else V0
+
+
+def search_bounds(names, ec: EvalConfig):
+    b = {**BOUNDS, **{k: tuple(v) for k, v in ec.bounds.items()}}
+    return np.array([b[n][0] for n in names]), np.array([b[n][1] for n in names])
+
+
+def decode(x, names, ec: EvalConfig = None):
+    """Continuous vector -> BrickParams; the last gene picks the lean mode (thirds of [0, 1]) unless fixed."""
+    ec = ec or EvalConfig()
+    p = with_vector(base_params(ec), names, x[:-1])
+    mode = ec.lean_mode or LEAN_MODES[min(int(x[-1]*len(LEAN_MODES)), len(LEAN_MODES) - 1)]
+    return replace(p, lean_mode=mode)
 
 
 def evaluate(p: BrickParams, ec: EvalConfig):
@@ -92,22 +113,25 @@ def evaluate(p: BrickParams, ec: EvalConfig):
         for mu in ec.frictions:
             cfg = T.TrialConfig(physics=Physics(timestep=0.001, friction=mu, contact_timeconst=0.004,
                                                 iterations=50), error=err)
-            rows, _ = T.drop_trials(p, bricks, cfg, samples=ec.drop_samples, seed=int(mu*1000))
-            drops += rows
+            for part in ec.drop_parts if p.lean_mode == 'ab' else ('A',):
+                rows, _ = T.drop_trials(p, bricks, cfg, samples=ec.drop_samples, seed=int(mu*1000), part=part)
+                drops += rows
         ds = T.summarize_drops(drops)
         cfg = T.TrialConfig(error=err)
-        ideal = T.TrialConfig(error=T.ErrorModel(ideal=True, aim_bias=err.aim_bias))
+        ideal = T.TrialConfig(error=T.ErrorModel(ideal=True, aim_bias=err.aim_bias,
+                                                 track_supporter=ec.overhang_track))
         ovh_runs = [T.assemble(p, bricks, S.overhang(ec.overhang_n, d), ideal)[0] for d in (+1, -1)]
         ovh = max(ovh_runs, key=lambda r: r['stable_bricks'])
         scores = {'drop': ds['p_success'],
                   'overhang': float(np.mean([r['stable_bricks']/r['total'] for r in ovh_runs]))}
         times = [r['time'] for r in drops]
+        build = {'wall': lambda: S.wall(*ec.wall), 'bridge': lambda: S.bridge(ec.bridge_arms),
+                 'tower': lambda: S.tower(ec.tower_h)}
         for seed in ec.structure_seeds:
-            wall, _ = T.assemble(p, bricks, S.wall(*ec.wall), cfg, seed=seed)
-            bridge, _ = T.assemble(p, bricks, S.bridge(ec.bridge_arms), cfg, seed=seed)
-            scores[f'wall{seed}'] = wall['stable_bricks']/wall['total']
-            scores[f'bridge{seed}'] = bridge['stable_bricks']/bridge['total']
-            times += [s['time'] for s in wall['stages'] + bridge['stages']]
+            for kind in ec.structures:
+                res, _ = T.assemble(p, bricks, build[kind](), cfg, seed=seed)
+                scores[f'{kind}{seed}'] = res['stable_bricks']/res['total']
+                times += [s['time'] for s in res['stages']]
         p_success = pooled_success(scores, ec)
         obj = {'neg_p_success': -p_success, 'f_max_N': ds['f_max_N'],
                't_assembly_s': float(np.mean(times)), 'mass_g': brick['mass_g'],
@@ -120,17 +144,17 @@ def evaluate(p: BrickParams, ec: EvalConfig):
 
 
 def _eval_job(x, names, ec_dict):
-    p = decode(np.asarray(x), names)
-    obj, margins, details = evaluate(p, EvalConfig.from_dict(ec_dict))
+    ec = EvalConfig.from_dict(ec_dict)
+    p = decode(np.asarray(x), names, ec)
+    obj, margins, details = evaluate(p, ec)
     return p.to_dict(), obj, margins, details
 
 
 class BrickProblem(ElementwiseProblem):
     def __init__(self, names, ec: EvalConfig, constraint_names, log, **kwargs):
-        lo = [BOUNDS[n][0] for n in names] + [0.]
-        hi = [BOUNDS[n][1] for n in names] + [1.]
-        super().__init__(n_var=len(lo), n_obj=len(OBJECTIVES), n_ieq_constr=len(constraint_names),
-                         xl=np.array(lo), xu=np.array(hi), **kwargs)
+        lo, hi = search_bounds(names, ec)
+        super().__init__(n_var=len(lo) + 1, n_obj=len(OBJECTIVES), n_ieq_constr=len(constraint_names),
+                         xl=np.r_[lo, 0.], xu=np.r_[hi, 1.], **kwargs)
         self.names, self.ec, self.constraint_names, self.log = names, ec, constraint_names, log
 
     def _evaluate(self, x, out, *args, **kwargs):
@@ -172,9 +196,9 @@ class Checkpoint(Callback):
         self.history.append(score)
         print(f'gen {gen}: best P={-F[:, 0].min():.3f}  min mass={F[:, 3].min():.1f} g  '
               f'score={score:.4f} ({gain:+.4f})', flush=True)
+        self.stale = 0 if gain >= self.min_improve else self.stale + 1
+        self.best = max(self.best, score)
         if self.patience:
-            self.stale = 0 if gain >= self.min_improve else self.stale + 1
-            self.best = max(self.best, score)
             if self.stale >= self.patience:
                 print(f'early stop: gain < {self.min_improve} for {self.patience} generations', flush=True)
                 algorithm.termination.force_termination = True
@@ -196,11 +220,11 @@ def select(F, weights):
     return int(np.argmax(score)), score
 
 
-def seed_population(names, size, rng, spread=0.15):
-    """V0 (every lean mode) plus Gaussian perturbations: start near the educated guess."""
-    lo = np.array([BOUNDS[n][0] for n in names])
-    hi = np.array([BOUNDS[n][1] for n in names])
-    base = np.array([getattr(V0, n) for n in names])
+def seed_population(names, size, rng, spread=0.15, ec: EvalConfig = None):
+    """Base params (every lean mode) plus Gaussian perturbations: start near the educated guess."""
+    ec = ec or EvalConfig()
+    lo, hi = search_bounds(names, ec)
+    base = np.clip([getattr(base_params(ec), n) for n in names], lo, hi)
     rows = [np.r_[base, (i + .5)/len(LEAN_MODES)] for i in range(len(LEAN_MODES))]
     while len(rows) < size:
         x = np.clip(base + rng.normal(0, spread, len(names))*(hi - lo), lo, hi)
@@ -224,7 +248,7 @@ def run(out, pop_size=24, generations=10, partitions=3, workers=8, seed=0, ec: E
     log = out/'evaluations'
     with Pool(workers) as pool:
         problem = BrickProblem(names, ec, cons, str(log), elementwise_runner=StarmapParallelization(pool.starmap))
-        initial = seed_population(names, pop_size, np.random.default_rng(seed))
+        initial = seed_population(names, pop_size, np.random.default_rng(seed), ec=ec)
         algorithm = NSGA3(ref_dirs=ref_dirs, pop_size=pop_size, sampling=initial)
         res = minimize(problem, algorithm, ('n_gen', generations), seed=seed, callback=Checkpoint(out, ec.weights, patience, min_improve),
                        verbose=False)
@@ -234,7 +258,7 @@ def run(out, pop_size=24, generations=10, partitions=3, workers=8, seed=0, ec: E
         return result
     X, F = np.atleast_2d(res.X), np.atleast_2d(res.F)
     best, scores = select(F, ec.weights)
-    front = [{'params': decode(x, names).to_dict(), 'objectives': dict(zip(OBJECTIVES, map(float, f))),
+    front = [{'params': decode(x, names, ec).to_dict(), 'objectives': dict(zip(OBJECTIVES, map(float, f))),
               'score': float(s)} for x, f, s in zip(X, F, scores)]
     result = {'status': 'ok', 'chosen': front[best], 'pareto_front': front}
     (out/'result.json').write_text(json.dumps(result, indent=2))
