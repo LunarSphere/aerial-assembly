@@ -1,4 +1,4 @@
-"""Command line: export, rules, drop, assemble, push, optimize."""
+"""Command line: export, baseplate, rules, drop, assemble, push, optimize."""
 import argparse
 from dataclasses import asdict, replace
 import json
@@ -95,6 +95,17 @@ def cmd_export(args):
     print(f'{bundle["mass_g"]:.2f} g, feasible={R.feasible(margins)}; wrote {out}')
 
 
+def cmd_baseplate(args):
+    from . import baseplate as B
+    p = load_params(args.params)
+    out = _new_dir(args.out)
+    bundle = B.build_baseplate(p, args.n, thickness=args.thickness, direction=args.direction)
+    path = B.export(bundle, out, step=args.step)
+    mesh = bundle['mesh']
+    print(f'{path}: {args.n}x{args.n}, {mesh.extents.round(1).tolist()} mm, {bundle["mass_g"]:.1f} g solid, '
+          f'watertight={mesh.is_watertight}')
+
+
 def cmd_rules(args):
     p = load_params(args.params)
     margins = R.rules(p, cad.build_brick(p, solid=False, part=args.part))
@@ -188,13 +199,14 @@ def cmd_optimize(args):
     cfg = read_json(args.config) if args.config else {}
     ec = O.EvalConfig.from_dict(cfg.get('eval', {}))
     run = cfg.get('run', {})
-    for k in ('pop', 'gens', 'workers', 'partitions', 'seed'):
+    for k in ('pop', 'gens', 'workers', 'partitions', 'seed', 'patience'):
         if getattr(args, k) is not None:
             run[k] = getattr(args, k)
     _new_dir(args.out)
     result = O.run(args.out, pop_size=run.get('pop', 24), generations=run.get('gens', 10),
                    partitions=run.get('partitions', 3), workers=run.get('workers', 8),
-                   seed=run.get('seed', 0), ec=ec)
+                   seed=run.get('seed', 0), ec=ec, patience=run.get('patience', 0),
+                   min_improve=run.get('min_improve', 0.01))
     if result['status'] == 'ok':
         print(json.dumps(result['chosen'], indent=1))
     else:
@@ -220,6 +232,14 @@ def parser():
     sp.add_argument('--part', choices=['A', 'B'], default='A', help="'ab' lean mode has two parts")
     sp.add_argument('--out', required=True)
     sp.set_defaults(func=cmd_export)
+    sp = sub.add_parser('baseplate', help='n x n baseplate STL (anchored seat for course 0)')
+    sp.add_argument('--params')
+    sp.add_argument('--n', type=int, required=True, help='plate side in voxels')
+    sp.add_argument('--direction', type=int, choices=[1, -1], default=1, help="build direction ('ab' mode slot lean)")
+    sp.add_argument('--thickness', type=float, help='plate thickness below the seats (mm)')
+    sp.add_argument('--step', action='store_true')
+    sp.add_argument('--out', required=True)
+    sp.set_defaults(func=cmd_baseplate)
     sp = sub.add_parser('rules', help='print analytic design-rule margins')
     sp.add_argument('--params')
     sp.add_argument('--part', choices=['A', 'B'], default='A')
@@ -257,7 +277,7 @@ def parser():
     sp = sub.add_parser('optimize', help='NSGA-III over brick parameters')
     sp.add_argument('--config')
     sp.add_argument('--out', required=True)
-    for k in ('pop', 'gens', 'workers', 'partitions', 'seed'):
+    for k in ('pop', 'gens', 'workers', 'partitions', 'seed', 'patience'):
         sp.add_argument(f'--{k}', type=int)
     sp.set_defaults(func=cmd_optimize)
     return ap

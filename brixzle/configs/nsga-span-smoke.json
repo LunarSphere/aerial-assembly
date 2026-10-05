@@ -1,0 +1,5 @@
+{
+  "run": {"pop": 12, "gens": 2, "partitions": 2, "workers": 12, "seed": 0, "patience": 2, "min_improve": 0.01},
+  "eval": {"drop_samples": 6, "frictions": [0.35], "overhang_n": 6, "wall": [2, 2],
+           "bridge_arms": 2, "structure_seeds": [1], "span_weight": 3.0}
+}

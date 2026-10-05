@@ -234,3 +234,41 @@ Next steps:
 - Give straights and turns a deeper Y gutter, or use the 3D project's square
   funnels on the cells: they captured about 95% of coarse drops.
 - Add T and X junction pieces built from the same cells for interior walls (rooms).
+
+## Span-weighted NSGA-III (`configs/nsga-span.json`, pick in `configs/nsga-span-chosen.json`)
+
+New search knobs (`optimize.py`):
+
+- `eval.span_weight` multiplies the overhang and bridge scores inside P(success)
+  (`eval.score_weights` sets the base weights). This run used 3. Overhangs are scored in both build
+  directions (12 bricks) and the bridge has 4-course arms, with two structure seeds.
+- The lean-mode gene now picks `alternate`, `uniform` or `ab`.
+- `run.patience` / `run.min_improve` stop the search when the best fixed-scale weighted score gains
+  less than `min_improve` for `patience` generations (CLI: `--patience`). Here it stopped at generation 8
+  (of a 30 cap) once the score sat at 0.247.
+
+Result: the pick is `ab`, V0-like geometry with a lower ramp angle (θ = 41.5°, α = 39.5°, 13.2 g).
+The search moved little from the seeds, so treat it as a modest refinement, not a new design. The
+early stop may have been premature: the score is flat after gen 5 because the best seed-derived design
+kept winning.
+
+Ideal-aim validation (stable bricks):
+
+| Design | overhang +x / −x (12) | bridge (3) | wall 3×4 |
+|---|---|---|---|
+| V0 | 4 / 3 | 7/7 | 10/10 |
+| nsga-chosen | 6 / 1 | 3/7 | 5/10 |
+| **nsga-span-chosen** | 5 / 5 | 7/7 | 10/10 |
+
+It is the only design that is symmetric in ±x and still completes the bridge and wall. With the full
+coarse error model (4 seeds), every design still fails within the first 0 to 3 bricks of a bridge or
+overhang, so the limit remains placement, not the geometry. This is the same conclusion as the A/B section.
+
+## Baseplate
+
+```bash
+uv run brixzle baseplate --params configs/nsga-span-chosen.json --n 4 --out runs/plate4 [--direction -1] [--step]
+```
+
+`baseplate.py` sweeps `profile.base_outer` through the brick's Y gutter for each of the n rows, fuses
+them, and cuts the bottom flat. The STL spans n·U × n·D and is watertight (`tests/test_baseplate.py`).

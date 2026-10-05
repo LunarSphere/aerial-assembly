@@ -29,6 +29,7 @@ from .params import BOUNDS, V0, BrickParams, with_vector
 
 OBJECTIVES = ['neg_p_success', 'f_max_N', 't_assembly_s', 'mass_g', 'collisions']
 # Rules whose margins are uninformative as constraints (always satisfied by bounds).
+LEAN_MODES = ('alternate', 'uniform', 'ab')  # last gene in [0, 1] picks one
 SKIP_RULES = {'tooth_strength', 'mass_min'}
 
 
@@ -41,6 +42,10 @@ class EvalConfig:
     bridge_arms: int = 3
     structure_seeds: tuple = (1,)
     weights: dict = field(default_factory=lambda: {'p': 1.0, 'f': 0.15, 't': 0.15, 'm': 0.3, 'c': 0.15})
+    # Relative weight of each score in P(success). span_weight scales overhang and bridge on top of that,
+    # so one knob prioritises building across gaps and out over edges.
+    score_weights: dict = field(default_factory=lambda: {'drop': 1., 'overhang': 1., 'wall': 1., 'bridge': 1.})
+    span_weight: float = 1.0
     error: dict = field(default_factory=dict)  # overrides for trials.ErrorModel
 
     @classmethod
@@ -52,10 +57,20 @@ class EvalConfig:
         return cls(**d)
 
 
+def pooled_success(scores, ec):
+    """Weighted mean of the drop / overhang / wall / bridge scores (keys may carry a seed suffix)."""
+    total = weight = 0.
+    for key, v in scores.items():
+        kind = key.rstrip('0123456789')
+        w = ec.score_weights.get(kind, 1.)*(ec.span_weight if kind in ('overhang', 'bridge') else 1.)
+        total, weight = total + w*v, weight + w
+    return float(total/weight)
+
+
 def decode(x, names):
-    """Continuous vector -> BrickParams; the last gene picks the lean mode."""
+    """Continuous vector -> BrickParams; the last gene picks the lean mode (thirds of [0, 1])."""
     p = with_vector(V0, names, x[:-1])
-    return replace(p, lean_mode='uniform' if x[-1] >= 0.5 else 'alternate')
+    return replace(p, lean_mode=LEAN_MODES[min(int(x[-1]*len(LEAN_MODES)), len(LEAN_MODES) - 1)])
 
 
 def evaluate(p: BrickParams, ec: EvalConfig):
@@ -63,7 +78,8 @@ def evaluate(p: BrickParams, ec: EvalConfig):
     t0 = time.time()
     worst = {'neg_p_success': 0., 'f_max_N': 200., 't_assembly_s': 5., 'mass_g': 50., 'collisions': 50.}
     try:
-        brick = cad.build_brick(p)
+        bricks = cad.build_bricks(p)
+        brick = bricks['A']
     except Exception as exc:  # geometry failed to build: infeasible
         return worst, {'geometry_builds': -1.}, {'error': repr(exc)}
     margins = {k: v for k, v in R.rules(p, brick).items() if k not in SKIP_RULES}
@@ -76,21 +92,23 @@ def evaluate(p: BrickParams, ec: EvalConfig):
         for mu in ec.frictions:
             cfg = T.TrialConfig(physics=Physics(timestep=0.001, friction=mu, contact_timeconst=0.004,
                                                 iterations=50), error=err)
-            rows, _ = T.drop_trials(p, brick, cfg, samples=ec.drop_samples, seed=int(mu*1000))
+            rows, _ = T.drop_trials(p, bricks, cfg, samples=ec.drop_samples, seed=int(mu*1000))
             drops += rows
         ds = T.summarize_drops(drops)
         cfg = T.TrialConfig(error=err)
         ideal = T.TrialConfig(error=T.ErrorModel(ideal=True, aim_bias=err.aim_bias))
-        ovh, _ = T.assemble(p, brick, S.overhang(ec.overhang_n, +1), ideal)
-        scores = {'drop': ds['p_success'], 'overhang': ovh['stable_bricks']/ovh['total']}
+        ovh_runs = [T.assemble(p, bricks, S.overhang(ec.overhang_n, d), ideal)[0] for d in (+1, -1)]
+        ovh = max(ovh_runs, key=lambda r: r['stable_bricks'])
+        scores = {'drop': ds['p_success'],
+                  'overhang': float(np.mean([r['stable_bricks']/r['total'] for r in ovh_runs]))}
         times = [r['time'] for r in drops]
         for seed in ec.structure_seeds:
-            wall, _ = T.assemble(p, brick, S.wall(*ec.wall), cfg, seed=seed)
-            bridge, _ = T.assemble(p, brick, S.bridge(ec.bridge_arms), cfg, seed=seed)
+            wall, _ = T.assemble(p, bricks, S.wall(*ec.wall), cfg, seed=seed)
+            bridge, _ = T.assemble(p, bricks, S.bridge(ec.bridge_arms), cfg, seed=seed)
             scores[f'wall{seed}'] = wall['stable_bricks']/wall['total']
             scores[f'bridge{seed}'] = bridge['stable_bricks']/bridge['total']
             times += [s['time'] for s in wall['stages'] + bridge['stages']]
-        p_success = float(np.mean(list(scores.values())))
+        p_success = pooled_success(scores, ec)
         obj = {'neg_p_success': -p_success, 'f_max_N': ds['f_max_N'],
                't_assembly_s': float(np.mean(times)), 'mass_g': brick['mass_g'],
                'collisions': ds['collisions']}
@@ -125,10 +143,22 @@ class BrickProblem(ElementwiseProblem):
                                  'margins': margins, 'details': details}, default=float) + '\n')
 
 
+def fixed_score(F, weights):
+    """Best weighted score in a population on fixed (not min-max) scales, so it is comparable across generations."""
+    F = np.asarray(F, dtype=float)
+    scale = np.array([1., 200., 5., 50., 50.])
+    w = np.array([weights['p'], weights['f'], weights['t'], weights['m'], weights['c']])
+    return float(((-F[:, 0])*w[0] - (F[:, 1:]/scale[1:]*w[1:]).sum(1)).max())
+
+
 class Checkpoint(Callback):
-    def __init__(self, out):
+    """Saves each generation and stops once the best score gains < min_improve for `patience` generations."""
+
+    def __init__(self, out, weights=None, patience=0, min_improve=0.01):
         super().__init__()
         self.out = Path(out)
+        self.weights, self.patience, self.min_improve = weights, patience, min_improve
+        self.best, self.stale, self.history = -np.inf, 0, []
 
     def notify(self, algorithm):
         pop = algorithm.pop
@@ -137,7 +167,17 @@ class Checkpoint(Callback):
                    'G': pop.get('G').tolist() if pop.get('G') is not None else None}
         (self.out/f'gen_{gen:03d}.json').write_text(json.dumps(payload))
         F = pop.get('F')
-        print(f'gen {gen}: best P={-F[:, 0].min():.3f}  min mass={F[:, 3].min():.1f} g', flush=True)
+        score = fixed_score(F, self.weights) if self.weights else 0.
+        gain = score - self.best
+        self.history.append(score)
+        print(f'gen {gen}: best P={-F[:, 0].min():.3f}  min mass={F[:, 3].min():.1f} g  '
+              f'score={score:.4f} ({gain:+.4f})', flush=True)
+        if self.patience:
+            self.stale = 0 if gain >= self.min_improve else self.stale + 1
+            self.best = max(self.best, score)
+            if self.stale >= self.patience:
+                print(f'early stop: gain < {self.min_improve} for {self.patience} generations', flush=True)
+                algorithm.termination.force_termination = True
 
 
 def constraint_names():
@@ -157,11 +197,11 @@ def select(F, weights):
 
 
 def seed_population(names, size, rng, spread=0.15):
-    """V0 (both lean modes) plus Gaussian perturbations: start near the educated guess."""
+    """V0 (every lean mode) plus Gaussian perturbations: start near the educated guess."""
     lo = np.array([BOUNDS[n][0] for n in names])
     hi = np.array([BOUNDS[n][1] for n in names])
     base = np.array([getattr(V0, n) for n in names])
-    rows = [np.r_[base, 0.25], np.r_[base, 0.75]]
+    rows = [np.r_[base, (i + .5)/len(LEAN_MODES)] for i in range(len(LEAN_MODES))]
     while len(rows) < size:
         x = np.clip(base + rng.normal(0, spread, len(names))*(hi - lo), lo, hi)
         rows.append(np.r_[x, rng.uniform()])
@@ -169,7 +209,7 @@ def seed_population(names, size, rng, spread=0.15):
 
 
 def run(out, pop_size=24, generations=10, partitions=3, workers=8, seed=0, ec: EvalConfig = EvalConfig(),
-        names=None):
+        names=None, patience=0, min_improve=0.01):
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     names = list(names or BOUNDS)
@@ -179,13 +219,14 @@ def run(out, pop_size=24, generations=10, partitions=3, workers=8, seed=0, ec: E
     (out/'config.json').write_text(json.dumps({'names': names, 'objectives': OBJECTIVES, 'constraints': cons,
                                                'pop_size': pop_size, 'generations': generations,
                                                'partitions': partitions, 'seed': seed,
+                                               'patience': patience, 'min_improve': min_improve,
                                                'eval': asdict(ec)}, indent=2))
     log = out/'evaluations'
     with Pool(workers) as pool:
         problem = BrickProblem(names, ec, cons, str(log), elementwise_runner=StarmapParallelization(pool.starmap))
         initial = seed_population(names, pop_size, np.random.default_rng(seed))
         algorithm = NSGA3(ref_dirs=ref_dirs, pop_size=pop_size, sampling=initial)
-        res = minimize(problem, algorithm, ('n_gen', generations), seed=seed, callback=Checkpoint(out),
+        res = minimize(problem, algorithm, ('n_gen', generations), seed=seed, callback=Checkpoint(out, ec.weights, patience, min_improve),
                        verbose=False)
     if res.F is None or len(np.atleast_2d(res.F)) == 0:
         result = {'status': 'no_feasible_solution'}
