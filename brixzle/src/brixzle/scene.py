@@ -34,12 +34,17 @@ def parked_position(j):
 
 
 def build_scene(p: BrickParams, brick, bases, n_bricks, physics: Physics, visual=True, body_parts=None,
-                static=None):
+                static=None, drone=None, collision='collision', sleep=False):
     """Return (model, xml, info). ``bases`` are [(v0, v1[, direction])] voxel ranges.
 
     ``brick`` is one bundle or {part: bundle}; ``body_parts`` names the part of
     each pooled body (default: all 'A'). ``static`` adds anchored convex vertex
-    sets (mm, world frame), e.g. the per-cell base of a 3D ring.
+    sets (mm, world frame), e.g. the per-cell base of a 3D ring. ``drone`` is
+    ``{'cfg': DroneConfig, 'gripper': bundle | None, 'pos': m}`` and adds the
+    simulated Crazyflie (``drone.add_drone``); ``collision`` picks the brick
+    bundle's collision key ('collision_bored' keeps the tine bores open).
+    ``sleep`` lets resting islands sleep (MuJoCo wakes them on contact, applied
+    force or velocity changes); drone scenes need it to stay affordable.
     """
     bundles = brick if 'collision' not in brick else {'A': brick}
     body_parts = list(body_parts or ['A']*n_bricks)
@@ -49,7 +54,8 @@ def build_scene(p: BrickParams, brick, bases, n_bricks, physics: Physics, visual
     option = ET.SubElement(root, 'option', timestep=str(physics.timestep), gravity='0 0 -9.81',
                            integrator='implicitfast', solver='Newton', cone='elliptic',
                            iterations=str(physics.iterations), tolerance='1e-10')
-    ET.SubElement(option, 'flag', nativeccd='enable', multiccd='enable', sleep='disable')
+    ET.SubElement(option, 'flag', nativeccd='enable', multiccd='enable',
+                  sleep='enable' if sleep else 'disable')
     default = ET.SubElement(root, 'default')
     ET.SubElement(default, 'geom', condim='3', friction=f'{physics.friction} 0.005 0.0001', margin='0',
                   solref=f'{physics.contact_timeconst} {physics.contact_dampratio}',
@@ -80,7 +86,7 @@ def build_scene(p: BrickParams, brick, bases, n_bricks, physics: Physics, visual
     ET.SubElement(world, 'geom', name='floor', type='plane', size='3 3 .01',
                   pos=f'0 0 {floor_z*MM - 0.0005}', rgba='.2 .22 .25 1', contype='1', conaffinity='1')
     for name, bundle in bundles.items():
-        for j, piece in enumerate(bundle['collision']):
+        for j, piece in enumerate(bundle[collision]):
             _mesh(asset, f'{name}_col_{j}', piece)
         for j, piece in enumerate(bundle.get('soft_collision', [])):
             _mesh(asset, f'{name}_soft_{j}', piece)
@@ -97,7 +103,7 @@ def build_scene(p: BrickParams, brick, bases, n_bricks, physics: Physics, visual
         ET.SubElement(body, 'freejoint', name=f'brick{j}_free')
         ET.SubElement(body, 'inertial', mass=str(mass), pos=_numbers(com),
                       fullinertia=_numbers([I[0, 0], I[1, 1], I[2, 2], I[0, 1], I[0, 2], I[1, 2]]))
-        for k in range(len(bundle['collision'])):
+        for k in range(len(bundle[collision])):
             ET.SubElement(body, 'geom', name=f'brick{j}_c{k}', type='mesh', mesh=f'{name}_col_{k}',
                           group='3', rgba='.3 .6 .9 .4', contype='1', conaffinity='1')
         # Snap barbs: soft contact stands in for the flexing a printed barb needs to pass the slot wall.
@@ -111,6 +117,9 @@ def build_scene(p: BrickParams, brick, bases, n_bricks, physics: Physics, visual
                 ('.95 .55 .15 1' if j % 2 else '.25 .55 .85 1')
             ET.SubElement(body, 'geom', name=f'brick{j}_vis', type='mesh', mesh=f'{name}_vis',
                           group='2', rgba=rgba, contype='0', conaffinity='0', mass='0')
+    if drone is not None:
+        from .drone import add_drone
+        add_drone(asset, world, drone['cfg'], drone.get('gripper'), drone.get('pos', (0., 0., 0.02)), visual)
     xml = ET.tostring(root, encoding='unicode')
     model = mujoco.MjModel.from_xml_string(xml)
     info = {
@@ -120,6 +129,7 @@ def build_scene(p: BrickParams, brick, bases, n_bricks, physics: Physics, visual
         'floor': model.geom('floor').id,
         'base_geoms': {model.geom(f'base{i}_{j}').id for i, b in enumerate(base_bundles)
                        for j in range(len(b['collision']))},
+        'static_geoms': {model.geom(f'static_{j}').id for j in range(len(static or []))},
     }
     return model, xml, info
 

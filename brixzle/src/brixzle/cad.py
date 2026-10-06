@@ -49,6 +49,45 @@ def _pieces(polygon, p: BrickParams):
     return pieces
 
 
+def bored_pieces(polygon, channels, p: BrickParams, segments=4):
+    """Convex pieces of the banded sweep with the straight Y tine bores left open.
+
+    In a sheared side band the straight bore appears in profile coordinates as a capsule
+    from z down to z - shear (``profile.channel_footprint``), in the flat centre band as a
+    circle. Each band's holed profile is cut by vertical lines through the bores into simple
+    polygons, then decomposed like ``_pieces``.
+    """
+    from shapely.geometry import LineString, Point
+    from shapely.ops import split
+    if not channels:
+        return _pieces(polygon, p)
+    r = p.fork_d/2 + p.fork_clearance
+    zmin, zmax = polygon.bounds[1] - 1, polygon.bounds[3] + 1
+    pieces = []
+    for y0, y1, z0, z1 in pr.y_bands(p):
+        sheared = abs(z1 - z0) > 1e-9
+        region = polygon
+        for c in channels:
+            if sheared:
+                hole = LineString([(c[0], c[1] - pr.shear_drop(p)), c]).buffer(r, quad_segs=segments)
+            else:
+                hole = Point(c).buffer(r, quad_segs=segments)
+            region = region.difference(hole)
+        geoms = [region] if region.geom_type == 'Polygon' else list(region.geoms)
+        for c in channels:
+            cut = LineString([(c[0], zmin), (c[0], zmax)])
+            geoms = [h for g in geoms for h in split(g, cut).geoms if h.geom_type == 'Polygon']
+        for g in geoms:
+            if g.area < 1e-3:
+                continue
+            coords = np.asarray(g.simplify(1e-3).exterior.coords)[:-1]
+            for q in convex_parts(coords):
+                near = np.column_stack([q[:, 0], np.full(len(q), y0), q[:, 1] + z0])
+                far = np.column_stack([q[:, 0], np.full(len(q), y1), q[:, 1] + z1])
+                pieces.append(np.vstack([near, far]))
+    return pieces
+
+
 def _mesh(shape, tolerance=0.05):
     vertices, faces = shape.tessellate(tolerance, 0.2)
     mesh = trimesh.Trimesh(np.array([v.toTuple() for v in vertices]), np.array(faces), process=True)
@@ -71,6 +110,7 @@ def build_brick(p: BrickParams, solid=True, part='A'):
         'params': p.to_dict(), 'part': part,
         'outer': outer, 'holes': holes, 'channels': channels,
         'collision': _pieces(outer, p),
+        'collision_bored': bored_pieces(outer, channels, p),
         'soft_collision': [q for b in barbs for q in _pieces(b, p)],
         'keels': [k.tolist() for k in parts['keels']],
         'valleys': [v.tolist() for v in parts['valleys']],

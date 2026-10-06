@@ -1,0 +1,15 @@
+{
+  "_sources": {
+    "taffanel2021": "Taffanel et al., 'Lighthouse Positioning System: Dataset, Accuracy, and Precision for UAV Research', arXiv:2104.11523 (2021). Sec. V: 'The mean and median Euclidean error is in all cases in the low centimeter (2 cm to 4 cm) range'; flight outliers 'about 5 cm'. Table III: LH2 EKF jitter 0.7 mm, LH2 crossing-beam rate 34+-18 Hz. Sec. VI: 'about 1 cm in the average case with outliers up to 5 cm during flight'.",
+    "bitcraze_docs": "https://www.bitcraze.io/documentation/system/positioning/ligthouse-positioning-system/: 'relative precision better than 1 mm and an absolute accuracy better than 10 cm' in a 5x5 m space."
+  },
+  "_derivation": "bias_sigma_mm: per-axis sigma s of an isotropic 3D Gaussian has mean Euclidean norm 1.596 s; Sec. VI's ~1 cm average gives s = 6.3 mm (lighthouse-pessimistic.json uses Sec. V's 2 cm lower bound: s = 12.5 mm). jitter_mm: Table III LH2 EKF.",
+  "_assumptions": "bias_gradient_mm_per_m, vel_noise_mps, att_noise_deg and latency_s are NOT from a source; they are modelling assumptions, varied in the sensitivity objective.",
+  "bias_sigma_mm": 12.5,
+  "bias_gradient_mm_per_m": 10.0,
+  "jitter_mm": 0.7,
+  "vel_noise_mps": 0.005,
+  "att_noise_deg": 0.1,
+  "latency_s": 0.01,
+  "registered": false
+}
