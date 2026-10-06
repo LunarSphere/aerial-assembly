@@ -41,8 +41,8 @@ class ForkParams:
     tine_material: str = 'pla'   # printed in one piece with the plate; 'cf'/'steel' are bought rods
     protrude: float = 4.0        # tine length beyond the brick's far face
     lead_in: float = 2.0         # conical tip length
-    gap: float = 2.0             # plate to the brick's near face
-    clear_guard: float = 3.0     # brick top below the prop-guard bottom
+    gap: float = 8.0             # plate to the brick's near face (room for the fixture's tine guide)
+    clear_guard: float = 8.0     # brick top below the prop-guard bottom (hover error + aim-low + margin)
     plate_t: float = 1.6         # printed plate thickness (y)
     plate_margin: float = 3.0    # plate beyond the outer tines (x)
     bracket_t: float = 2.0       # mount bracket thickness (z)
@@ -53,7 +53,7 @@ class ForkParams:
 
 
 FAMILIES = {'fork': ForkParams}
-BOUNDS = {'fork': {'tine_d': (1.2, 2.4), 'protrude': (1.0, 10.0), 'lead_in': (0.5, 4.0), 'gap': (1.0, 6.0),
+BOUNDS = {'fork': {'tine_d': (1.2, 2.4), 'protrude': (1.0, 10.0), 'lead_in': (0.5, 4.0), 'gap': (2.0, 14.0),
                    'clear_guard': (1.0, 12.0), 'plate_t': (1.2, 3.0), 'detent_h': (0.0, 0.3)}}
 
 
@@ -131,16 +131,31 @@ def build_gripper(gp, brick, p: BrickParams, solid=True):
     bracket_lo = (-HEADER_HALF[0] - 2, y_face - gp.plate_t, z_bracket)
     bracket_hi = (HEADER_HALF[0] + 2, HEADER_HALF[1], HEADER_BOTTOM)
     collision = [_box(plate_lo, plate_hi), _box(bracket_lo, bracket_hi)]
-    collision += [_rod_piece(x, z, y_face, y_tip, r, gp.lead_in) for x, z in tines]
+    rods = [_rod_piece(x, z, y_face, y_tip, r, gp.lead_in) for x, z in tines]
     meshes = {'printed': trimesh.util.concatenate([trimesh.convex.convex_hull(collision[0]),
                                                    trimesh.convex.convex_hull(collision[1])]),
-              'tines': [trimesh.convex.convex_hull(c) for c in collision[2:]]}
+              'tines': [trimesh.convex.convex_hull(c) for c in rods]}
     parts = [_part_mass(trimesh.convex.convex_hull(c), PLA_DENSITY) for c in collision[:2]]
     parts += [_part_mass(m, DENSITY[gp.tine_material]) for m in meshes['tines']]
     mass, com, inertia = _combine(parts)
-    bundle = {'params': gp.to_dict(), 'family': gp.family, 'collision': collision, 'mass_g': mass,
-              'com': com.tolist(), 'inertia': inertia.tolist(), 'tines': tines, 'carry': origin.tolist(),
-              'axis': [0., 1., 0.], 'y_face': y_face, 'y_tip': y_tip, 'engage_depth': y_tip - y_face,
+    # Slide gripper and brick together in x and y so the combined COM sits on the drone axis.
+    m_b = brick['mass_g']
+    sx, shift = -(mass*com[:2] + m_b*(origin[:2] + np.asarray(brick['com'][:2])))/(mass + m_b)
+    move = np.array([sx, shift, 0.])
+    collision = [c + move for c in collision]
+    moved = [(x + sx, z) for x, z in tines]
+    # Tines collide as capsules: smooth, cheap, and the hemispherical tip is a natural lead-in.
+    capsules = [{'type': 'capsule', 'size': r, 'fromto': [x, y_face + shift, z, x, y_tip + shift - r, z]}
+                for x, z in moved]
+    origin = origin + move
+    com = com + move
+    for m in [meshes['printed'], *meshes['tines']]:
+        m.apply_translation(move)
+    bundle = {'params': gp.to_dict(), 'family': gp.family, 'collision': collision, 'primitives': capsules,
+              'mass_g': mass,
+              'com': com.tolist(), 'inertia': inertia.tolist(), 'tines': moved, 'carry': origin.tolist(),
+              'axis': [0., 1., 0.], 'y_face': y_face + shift, 'y_tip': y_tip + shift, 'engage_depth': y_tip - y_face,
+              'y_shift': shift,
               'mesh': trimesh.util.concatenate([meshes['printed'], *meshes['tines']])}
     if solid:
         shape = cq.Solid.makeBox(x_hi - x_lo, gp.plate_t, HEADER_BOTTOM - z_plate_lo,
@@ -155,7 +170,7 @@ def build_gripper(gp, brick, p: BrickParams, solid=True):
             rods = rod if rods is None else rods.fuse(rod)
         if gp.tine_material == 'pla':
             shape = shape.fuse(rods)
-        bundle.update(shape=shape.clean(), rods=rods.clean())
+        bundle.update(shape=shape.clean().translate(cq.Vector(*move)), rods=rods.clean().translate(cq.Vector(*move)))
     return bundle
 
 
@@ -185,6 +200,7 @@ def gripper_rules(gp, g, brick, p: BrickParams, drone: DroneConfig, s: GripperRu
     top = brick['mesh'].bounds[1][2] if 'mesh' in brick else brick['outer'].bounds[3]
     out['clears_guards'] = GUARD_BOTTOM - (carry[2] + top) - 1.0
     gr_hi = max(np.max(np.asarray(c)[:, 2]) for c in g['collision'])
+    # Everything the gripper adds sits below the PCB; the Lighthouse deck on top sees the sky.
     out['clears_deck'] = PCB_BOTTOM - gr_hi       # nothing above the PCB: the Lighthouse deck sees the sky
     # Gripper + brick footprint must stay inside the circle that clears the props' disks below.
     pts = np.vstack([np.asarray(c)[:, :2] for c in g['collision']])

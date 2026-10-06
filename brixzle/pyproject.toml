@@ -9,6 +9,7 @@ description = "Parametric drop-assembled bricks: CadQuery geometry, MuJoCo assem
 requires-python = "==3.12.*"
 dependencies = [
     "aerial-assembly",
+    "flight",
     "cadquery>=2.5",
     "mujoco==3.13.0",
     "numpy>=2,<3",
@@ -29,6 +30,7 @@ brixzle = "brixzle.cli:main"
 
 [tool.uv.sources]
 aerial-assembly = { path = "../simulation", editable = true }
+flight = { path = "../flight", editable = true }
 
 [tool.setuptools.packages.find]
 where = ["src"]

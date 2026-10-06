@@ -24,8 +24,12 @@ def _camera(model, frames, active):
     return cam
 
 
-def render(model, frames, out, active=None, width=960, height=720, fps=60, azimuth=90, elevation=-12):
-    """Write frames to ``out`` (.mp4 or .png of the last frame). Returns the path."""
+def render(model, frames, out, active=None, width=960, height=720, fps=60, azimuth=90, elevation=-12,
+           lookat=None, distance=None, track=None):
+    """Write frames to ``out`` (.mp4 or .png of the last frame). Returns the path.
+
+    ``lookat`` (m) and ``distance`` (m) fix the camera; ``track`` (body name) follows a body.
+    """
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
     data = mujoco.MjData(model)
@@ -35,6 +39,11 @@ def render(model, frames, out, active=None, width=960, height=720, fps=60, azimu
         active = [b for b in range(1, model.nbody) if data.xpos[b][2] < 1.5]
     cam = _camera(model, frames, active)
     cam.azimuth, cam.elevation = azimuth, elevation
+    if lookat is not None:
+        cam.lookat[:] = lookat
+    if distance is not None:
+        cam.distance = distance
+    track_id = model.body(track).id if track else None
     opt = mujoco.MjvOption()
     opt.geomgroup[:] = [1, 1, 1, 0, 0, 0]
     with mujoco.Renderer(model, height, width) as r:
@@ -42,6 +51,8 @@ def render(model, frames, out, active=None, width=960, height=720, fps=60, azimu
         for q in (frames if out.suffix == '.mp4' else frames[-1:]):
             data.qpos[:] = q
             mujoco.mj_forward(model, data)
+            if track_id is not None:
+                cam.lookat[:] = data.xpos[track_id]
             r.update_scene(data, cam, opt)
             images.append(r.render())
     if out.suffix == '.mp4':

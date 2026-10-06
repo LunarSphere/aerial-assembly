@@ -274,6 +274,26 @@ def parser():
     common(sp, out=False)
     sp.add_argument('--height', type=int, default=6)
     sp.set_defaults(func=cmd_push)
+    sp = sub.add_parser('gripper', help='passive gripper: build, export STL/STEP, rule margins')
+    sp.add_argument('action', choices=['export'])
+    sp.add_argument('--params')
+    sp.add_argument('--gripper', help='gripper params JSON (default: fork)')
+    sp.add_argument('--drone', help='drone config JSON (default: configs/drone-cf21B.json values)')
+    sp.add_argument('--out', required=True)
+    sp.set_defaults(func=cmd_gripper)
+    sp = sub.add_parser('fly-assemble', help='closed-loop simulated Crazyflie picks, flies and places bricks')
+    sp.add_argument('structure')
+    common(sp)
+    sp.add_argument('--gripper', help='gripper params JSON (default: fork)')
+    sp.add_argument('--config', help='FlyConfig JSON (drone, lighthouse, camera, fixture, planner, ...)')
+    sp.add_argument('--lighthouse', help='Lighthouse model JSON (overrides --config)')
+    sp.add_argument('--bricks', type=int, help='only the first N bricks of the order')
+    sp.add_argument('--seeds', type=int, default=1)
+    sp.add_argument('--workers', type=int, default=1)
+    sp.add_argument('--ideal-drone', action='store_true', help='old free-body drop baseline, no drone')
+    sp.add_argument('--keep-going', action='store_true')
+    sp.add_argument('--video', action='store_true', help='MP4 of the first seed')
+    sp.set_defaults(func=cmd_fly_assemble)
     sp = sub.add_parser('optimize', help='NSGA-III over brick parameters')
     sp.add_argument('--config')
     sp.add_argument('--out', required=True)
@@ -281,6 +301,81 @@ def parser():
         sp.add_argument(f'--{k}', type=int)
     sp.set_defaults(func=cmd_optimize)
     return ap
+
+
+def _fly_config(args):
+    from . import flyassemble as FA
+    cfg = FA.config_from_dict(read_json(args.config)) if args.config else FA.FlyConfig()
+    if args.lighthouse:
+        from .estimator import LighthouseModel
+        cfg.lighthouse = LighthouseModel.from_dict(read_json(args.lighthouse))
+    cfg.physics = Physics(timestep=args.timestep, friction=args.mu, contact_timeconst=args.timeconst, iterations=50)
+    cfg.keep_going = args.keep_going
+    return cfg
+
+
+def cmd_gripper(args):
+    from . import gripper as Gr
+    from .drone_params import DroneConfig
+    p = load_params(args.params)
+    out = _new_dir(args.out)
+    gp = Gr.params_from_dict(read_json(args.gripper)) if args.gripper else Gr.ForkParams()
+    drone = DroneConfig.from_dict(read_json(args.drone)) if args.drone else DroneConfig()
+    brick = cad.build_brick(p)
+    g = Gr.build_gripper(gp, brick, p)
+    Gr.export(g, out)
+    margins = Gr.gripper_rules(gp, g, brick, p, drone)
+    payload = g['mass_g'] + brick['mass_g']
+    write_json(out/'gripper.json', {'params': gp.to_dict(), 'mass_g': g['mass_g'], 'com_mm': g['com'],
+                                    'carry_mm': g['carry'], 'tines_mm': g['tines'], 'payload_g': payload,
+                                    'thrust_to_weight': {s: drone.t_w(payload, s) for s in drone.thrust_per_motor_N},
+                                    'margins': margins, 'feasible': Gr.feasible(margins)})
+    for k, v in margins.items():
+        print(f'{"ok " if v >= 0 else "FAIL"} {k:24s} {v:9.3f}')
+    print(f'gripper {g["mass_g"]:.2f} g + brick {brick["mass_g"]:.2f} g = {payload:.2f} g; wrote {out}')
+
+
+def cmd_fly_assemble(args):
+    from . import flyassemble as FA, gripper as Gr
+    p = load_params(args.params)
+    out = _new_dir(args.out)
+    if args.structure not in S.CATALOG:
+        sys.exit(f'Unknown structure; choose from {sorted(S.CATALOG)}')
+    if args.ideal_drone:
+        cfg = _trial_config(argparse.Namespace(**{**vars(args), 'ideal': True, 'track': True}))
+        result, _ = T.assemble(p, cad.build_bricks(p), S.CATALOG[args.structure](), cfg, seed=args.seed,
+                               stop_on_fail=not args.keep_going)
+        write_json(out/'summary.json', result)
+        print(f'ideal drone (free-body drop): {result["status"]}, {result["stable_bricks"]}/{result["total"]}')
+        return
+    gp = Gr.params_from_dict(read_json(args.gripper)) if args.gripper else Gr.ForkParams()
+    cfg = _fly_config(args)
+    seeds = list(range(args.seed, args.seed + args.seeds))
+    plan, layout, brick, gripper, structure = FA.make_plan(p, gp, args.structure, cfg, args.bricks)
+    write_json(out/'plan.json', plan)
+    write_json(out/'config.json', {'params': p.to_dict(), 'gripper': gp.to_dict(), 'fly': cfg.to_dict(),
+                                   'seeds': seeds, 'bricks': args.bricks, 'structure': args.structure,
+                                   'note': 'simulated; uncalibrated contact and aerodynamics; not hardware rates'})
+    if args.video:
+        h = FA.Harness(p, plan, brick, gripper, structure, cfg, seed=seeds[0], record_fps=30)
+        first = h.run()
+        from .render import render
+        render(h.model, h.world.frames, out/'flight.mp4', fps=30, azimuth=60, elevation=-20)
+        render(h.model, h.world.frames, out/'flight_close.mp4', fps=30, azimuth=120, elevation=-15, track='cf',
+               distance=0.3)
+        render(h.model, h.world.frames, out/'final.png', azimuth=60, elevation=-20)
+        first.pop('events', None)
+        first['seed'] = seeds[0]
+        results = [first] + FA.run_seeds(p, gp, args.structure, cfg, seeds[1:], args.bricks, args.workers)
+    else:
+        results = FA.run_seeds(p, gp, args.structure, cfg, seeds, args.bricks, args.workers)
+    with open(out/'bricks.jsonl', 'w') as f:
+        for r in results:
+            for b in r['bricks']:
+                f.write(json.dumps({'seed': r['seed'], **b}, default=float) + '\n')
+    summary = FA.summarize(results)
+    write_json(out/'summary.json', summary)
+    print(json.dumps({k: summary[k] for k in ('p_brick_success', 'p_structure_complete', 'outcomes')}, indent=1))
 
 
 def main(argv=None):

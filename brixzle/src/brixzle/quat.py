@@ -1,12 +1,7 @@
-"""The single conversion point between brixzle/MuJoCo [w, x, y, z] and crazyflow/scipy [x, y, z, w]."""
-import numpy as np
+"""Quaternion order conversion: [w, x, y, z] (brixzle/MuJoCo) <-> [x, y, z, w] (crazyflow/scipy).
 
+Implemented once, in ``flight.frames``; re-exported here so brixzle never converts elsewhere.
+"""
+from flight.frames import wxyz_to_xyzw, xyzw_to_wxyz
 
-def wxyz_to_xyzw(q):
-    q = np.asarray(q, dtype=float)
-    return np.concatenate((q[..., 1:4], q[..., :1]), axis=-1)
-
-
-def xyzw_to_wxyz(q):
-    q = np.asarray(q, dtype=float)
-    return np.concatenate((q[..., 3:4], q[..., :3]), axis=-1)
+__all__ = ['wxyz_to_xyzw', 'xyzw_to_wxyz']

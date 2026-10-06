@@ -49,15 +49,17 @@ def _pieces(polygon, p: BrickParams):
     return pieces
 
 
-def bored_pieces(polygon, channels, p: BrickParams, segments=4):
+def bored_pieces(polygon, channels, p: BrickParams):
     """Convex pieces of the banded sweep with the straight Y tine bores left open.
 
-    In a sheared side band the straight bore appears in profile coordinates as a capsule
-    from z down to z - shear (``profile.channel_footprint``), in the flat centre band as a
-    circle. Each band's holed profile is cut by vertical lines through the bores into simple
-    polygons, then decomposed like ``_pieces``.
+    In a sheared side band the straight bore appears in profile coordinates as a slot from z
+    down to z - shear (``profile.channel_footprint``), in the flat centre band as the bore
+    itself. For collision the bore is the square circumscribing its circle (same +-clearance
+    play for a round tine, and no arc vertices, whose sliver pieces snag sliding tines). Each
+    band's holed profile is cut by vertical lines through the bores into simple polygons, then
+    decomposed like ``_pieces``.
     """
-    from shapely.geometry import LineString, Point
+    from shapely.geometry import LineString, box
     from shapely.ops import split
     if not channels:
         return _pieces(polygon, p)
@@ -68,10 +70,8 @@ def bored_pieces(polygon, channels, p: BrickParams, segments=4):
         sheared = abs(z1 - z0) > 1e-9
         region = polygon
         for c in channels:
-            if sheared:
-                hole = LineString([(c[0], c[1] - pr.shear_drop(p)), c]).buffer(r, quad_segs=segments)
-            else:
-                hole = Point(c).buffer(r, quad_segs=segments)
+            low = c[1] - (pr.shear_drop(p) if sheared else 0.)
+            hole = box(c[0] - r, low - r, c[0] + r, c[1] + r)
             region = region.difference(hole)
         geoms = [region] if region.geom_type == 'Polygon' else list(region.geoms)
         for c in channels:

@@ -18,8 +18,9 @@ def test_fork_v0_is_feasible_and_hangs_brick_on_axis(brick):
     g = Gr.build_gripper(gp, brick, V0)
     m = Gr.gripper_rules(gp, g, brick, V0, CF21B)
     assert Gr.feasible(m), {k: v for k, v in m.items() if v < 0}
-    com_world = np.asarray(g['carry']) + brick['com']
-    assert abs(com_world[0]) < 1e-9 and abs(com_world[1]) < 1e-9
+    brick_com = np.asarray(g['carry']) + brick['com']
+    combined = (g['mass_g']*np.asarray(g['com']) + brick['mass_g']*brick_com)/(g['mass_g'] + brick['mass_g'])
+    assert np.allclose(combined[:2], 0, atol=1e-9) and np.hypot(*brick_com[:2]) < 5.
     # Tines sit where the brick's bores are, once the brick is at its carried pose.
     for (x, z), (bx, bz) in zip(g['tines'], brick['channels']):
         assert np.isclose(x, bx + g['carry'][0]) and np.isclose(z, bz + g['carry'][2])

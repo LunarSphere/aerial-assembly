@@ -85,6 +85,10 @@ def _add_gripper(asset, body, g, visual):
         ET.SubElement(asset, 'mesh', name=name, vertex=_numbers(np.asarray(piece)*MM))
         ET.SubElement(grip, 'geom', name=name, type='mesh', mesh=name, group='3', contype='1',
                       conaffinity='1', rgba='.8 .2 .2 .4', **g.get('geom_attrs', {}))
+    for k, prim in enumerate(g.get('primitives', [])):
+        ET.SubElement(grip, 'geom', name=f'{NAME}_grip_p{k}', type=prim['type'], size=_numbers([prim['size']*MM]),
+                      fromto=_numbers(np.asarray(prim['fromto'])*MM), group='3', contype='1', conaffinity='1',
+                      rgba='.8 .2 .2 .4', mass='0')
     if visual and 'mesh' in g:
         mesh = g['mesh']
         ET.SubElement(asset, 'mesh', name=f'{NAME}_grip_vis', vertex=_numbers(mesh.vertices*MM),
@@ -154,6 +158,23 @@ class Drone:
 
     def set_ctrl_mass(self, kg):
         self.p_state = dict(self.p_state, mass=kg)
+
+    # firmware ctrlMel param -> (controller stage, key, axes); crazyflow arrays are [x, y, z]/[r, p, y]
+    GAINS = {'kp_xy': ('state', 'kp', (0, 1)), 'kd_xy': ('state', 'kd', (0, 1)), 'ki_xy': ('state', 'ki', (0, 1)),
+             'i_range_xy': ('state', 'int_err_max', (0, 1)), 'kp_z': ('state', 'kp', (2,)),
+             'kd_z': ('state', 'kd', (2,)), 'ki_z': ('state', 'ki', (2,)), 'i_range_z': ('state', 'int_err_max', (2,)),
+             'kR_xy': ('att', 'kR', (0, 1)), 'kw_xy': ('att', 'kw', (0, 1)), 'ki_m_xy': ('att', 'ki_m', (0, 1)),
+             'i_range_m_xy': ('att', 'int_err_max', (0, 1)), 'kR_z': ('att', 'kR', (2,)), 'kw_z': ('att', 'kw', (2,)),
+             'ki_m_z': ('att', 'ki_m', (2,)), 'i_range_m_z': ('att', 'int_err_max', (2,)),
+             'kd_omega_rp': ('att', 'kd_omega', (0, 1))}
+
+    def set_gain(self, name, value):
+        """Apply a firmware ``ctrlMel.<name>`` gain to the ported controller."""
+        stage, key, axes = self.GAINS[name]
+        params = self.p_state if stage == 'state' else self.p_att
+        arr = np.array(params[key], dtype=float)
+        arr[list(axes)] = value
+        params[key] = arr
 
     def place(self, pos, yaw=0.):
         self.data.qpos[self.qpos:self.qpos+3] = pos
