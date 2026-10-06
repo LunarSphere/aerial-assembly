@@ -38,7 +38,7 @@ MOTOR_XY = 35.355
 class ForkParams:
     family: str = 'fork'
     tine_d: float = 2.0          # rod diameter (brick bore is fork_d + 2 fork_clearance)
-    tine_material: str = 'cf'
+    tine_material: str = 'pla'   # printed in one piece with the plate; 'cf'/'steel' are bought rods
     protrude: float = 4.0        # tine length beyond the brick's far face
     lead_in: float = 2.0         # conical tip length
     gap: float = 2.0             # plate to the brick's near face
@@ -153,6 +153,8 @@ def build_gripper(gp, brick, p: BrickParams, solid=True):
             rod = rod.fuse(cq.Solid.makeCone(r, .25*r, gp.lead_in, cq.Vector(x, y_tip - gp.lead_in, z),
                                              cq.Vector(0, 1, 0)))
             rods = rod if rods is None else rods.fuse(rod)
+        if gp.tine_material == 'pla':
+            shape = shape.fuse(rods)
         bundle.update(shape=shape.clean(), rods=rods.clean())
     return bundle
 
@@ -223,5 +225,6 @@ def export(bundle, out):
     bundle['mesh'].export(out/'gripper.stl')
     if 'shape' in bundle:
         cq.exporters.export(bundle['shape'], str(out/'gripper_printed.step'))
-        cq.exporters.export(bundle['rods'], str(out/'gripper_rods.step'))
+        if bundle['params']['tine_material'] != 'pla':
+            cq.exporters.export(bundle['rods'], str(out/'gripper_rods.step'))
     return out
