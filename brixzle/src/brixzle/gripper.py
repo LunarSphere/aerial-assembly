@@ -29,6 +29,8 @@ MODULUS = {'pla': 3.0, 'cf': 120., 'steel': 200.}
 PCB_BOTTOM = -1.2
 HEADER_BOTTOM = -2.4
 HEADER_HALF = (9.4, 11.4)
+HEADER_PIN_Y = 11.0      # mm, the two 1x10 bottom header rows (2.0 mm pitch, x = -9 ... 9)
+PIN_HOLE_D = 1.0         # mm, clearance for the header pins in the printed bracket
 GUARD_BOTTOM = -15.3
 GUARD_RADIUS = 34.0
 MOTOR_XY = 35.355
@@ -113,64 +115,77 @@ def carried_pose(gp, brick):
 
 
 def build_gripper(gp, brick, p: BrickParams, solid=True):
+    """Fork: a mount bracket fixed under the bottom header pins, a vertical plate, two tines.
+
+    The plate, tines and carried brick are slid together in x and y until the combined COM
+    (bracket included) is on the drone axis; the bracket stays on the pins and is stretched
+    to reach the plate.
+    """
     if gp.family != 'fork':
         raise NotImplementedError(gp.family)
     if len(brick['channels']) != 2:
         raise ValueError('Fork gripper needs a brick with two tine bores')
-    origin = carried_pose(gp, brick)
-    tines = [(x + origin[0], z + origin[2]) for x, z in brick['channels']]
+    origin0 = carried_pose(gp, brick)
+    tines0 = [(x + origin0[0], z + origin0[2]) for x, z in brick['channels']]
     r = gp.tine_d/2
-    y_face = -(p.D/2 + gp.gap)
-    y_tip = p.D/2 + gp.protrude
-    xs = [t[0] for t in tines]
-    x_lo, x_hi = min(xs) - r - gp.plate_margin, max(xs) + r + gp.plate_margin
+    y_face0 = -(p.D/2 + gp.gap)
+    y_tip0 = p.D/2 + gp.protrude
+    xs = [t[0] for t in tines0]
+    x_lo0, x_hi0 = min(xs) - r - gp.plate_margin, max(xs) + r + gp.plate_margin
     z_bracket = HEADER_BOTTOM - gp.bracket_t
-    z_plate_lo = min(t[1] for t in tines) - r - p.wall
-    plate_lo = (x_lo, y_face - gp.plate_t, z_plate_lo)
-    plate_hi = (x_hi, y_face, HEADER_BOTTOM)
-    bracket_lo = (-HEADER_HALF[0] - 2, y_face - gp.plate_t, z_bracket)
-    bracket_hi = (HEADER_HALF[0] + 2, HEADER_HALF[1], HEADER_BOTTOM)
-    collision = [_box(plate_lo, plate_hi), _box(bracket_lo, bracket_hi)]
-    rods = [_rod_piece(x, z, y_face, y_tip, r, gp.lead_in) for x, z in tines]
-    meshes = {'printed': trimesh.util.concatenate([trimesh.convex.convex_hull(collision[0]),
-                                                   trimesh.convex.convex_hull(collision[1])]),
-              'tines': [trimesh.convex.convex_hull(c) for c in rods]}
-    parts = [_part_mass(trimesh.convex.convex_hull(c), PLA_DENSITY) for c in collision[:2]]
-    parts += [_part_mass(m, DENSITY[gp.tine_material]) for m in meshes['tines']]
-    mass, com, inertia = _combine(parts)
-    # Slide gripper and brick together in x and y so the combined COM sits on the drone axis.
+    z_plate_lo = min(t[1] for t in tines0) - r - p.wall
     m_b = brick['mass_g']
-    sx, shift = -(mass*com[:2] + m_b*(origin[:2] + np.asarray(brick['com'][:2])))/(mass + m_b)
-    move = np.array([sx, shift, 0.])
-    collision = [c + move for c in collision]
-    moved = [(x + sx, z) for x, z in tines]
+    move = np.zeros(3)
+    for _ in range(3):   # bracket extent depends on the shift, the shift on the bracket's mass
+        plate = _box((x_lo0, y_face0 - gp.plate_t, z_plate_lo), (x_hi0, y_face0, HEADER_BOTTOM)) + move
+        rods = [_rod_piece(x + move[0], z, y_face0 + move[1], y_tip0 + move[1], r, gp.lead_in) for x, z in tines0]
+        b_lo = (min(-HEADER_HALF[0] - 2, x_lo0 + move[0]), min(-HEADER_PIN_Y - 2, y_face0 + move[1] - gp.plate_t),
+                z_bracket)
+        b_hi = (max(HEADER_HALF[0] + 2, x_hi0 + move[0]), HEADER_PIN_Y + 2, HEADER_BOTTOM)
+        bracket = _box(b_lo, b_hi)
+        moving = [_part_mass(trimesh.convex.convex_hull(plate), PLA_DENSITY)]
+        moving += [_part_mass(trimesh.convex.convex_hull(c), DENSITY[gp.tine_material]) for c in rods]
+        fixed = _part_mass(trimesh.convex.convex_hull(bracket), PLA_DENSITY)
+        mass, com, inertia = _combine(moving + [fixed])
+        # Zero the combined (gripper + brick) COM in x, y by moving everything but the bracket.
+        resid = mass*com[:2] + m_b*(origin0[:2] + move[:2] + np.asarray(brick['com'][:2]))
+        m_moving = sum(m for m, _, _ in moving) + m_b
+        move[:2] -= resid/m_moving
+    plate = _box((x_lo0, y_face0 - gp.plate_t, z_plate_lo), (x_hi0, y_face0, HEADER_BOTTOM)) + move
+    rods = [_rod_piece(x + move[0], z, y_face0 + move[1], y_tip0 + move[1], r, gp.lead_in) for x, z in tines0]
+    collision = [plate, bracket]
+    moving = [_part_mass(trimesh.convex.convex_hull(plate), PLA_DENSITY)]
+    moving += [_part_mass(trimesh.convex.convex_hull(c), DENSITY[gp.tine_material]) for c in rods]
+    mass, com, inertia = _combine(moving + [_part_mass(trimesh.convex.convex_hull(bracket), PLA_DENSITY)])
+    origin = origin0 + move
+    tines = [(x + move[0], z) for x, z in tines0]
+    y_face, y_tip = y_face0 + move[1], y_tip0 + move[1]
     # Tines collide as capsules: smooth, cheap, and the hemispherical tip is a natural lead-in.
-    capsules = [{'type': 'capsule', 'size': r, 'fromto': [x, y_face + shift, z, x, y_tip + shift - r, z]}
-                for x, z in moved]
-    origin = origin + move
-    com = com + move
-    for m in [meshes['printed'], *meshes['tines']]:
-        m.apply_translation(move)
+    capsules = [{'type': 'capsule', 'size': r, 'fromto': [x, y_face, z, x, y_tip - r, z]} for x, z in tines]
+    mesh = trimesh.util.concatenate([trimesh.convex.convex_hull(c) for c in [plate, bracket, *rods]])
     bundle = {'params': gp.to_dict(), 'family': gp.family, 'collision': collision, 'primitives': capsules,
-              'mass_g': mass,
-              'com': com.tolist(), 'inertia': inertia.tolist(), 'tines': moved, 'carry': origin.tolist(),
-              'axis': [0., 1., 0.], 'y_face': y_face + shift, 'y_tip': y_tip + shift, 'engage_depth': y_tip - y_face,
-              'y_shift': shift,
-              'mesh': trimesh.util.concatenate([meshes['printed'], *meshes['tines']])}
+              'mass_g': mass, 'com': com.tolist(), 'inertia': inertia.tolist(), 'tines': tines,
+              'carry': origin.tolist(), 'axis': [0., 1., 0.], 'y_face': y_face, 'y_tip': y_tip,
+              'engage_depth': y_tip - y_face, 'shift': move[:2].tolist(), 'mesh': mesh}
     if solid:
-        shape = cq.Solid.makeBox(x_hi - x_lo, gp.plate_t, HEADER_BOTTOM - z_plate_lo,
-                                 cq.Vector(x_lo, y_face - gp.plate_t, z_plate_lo))
-        shape = shape.fuse(cq.Solid.makeBox(bracket_hi[0] - bracket_lo[0], bracket_hi[1] - bracket_lo[1],
-                                            gp.bracket_t, cq.Vector(*bracket_lo)))
-        rods = None
+        shape = cq.Solid.makeBox(x_hi0 - x_lo0, gp.plate_t, HEADER_BOTTOM - z_plate_lo,
+                                 cq.Vector(x_lo0 + move[0], y_face - gp.plate_t, z_plate_lo))
+        shape = shape.fuse(cq.Solid.makeBox(b_hi[0] - b_lo[0], b_hi[1] - b_lo[1], gp.bracket_t, cq.Vector(*b_lo)))
+        # Two rows of 10 holes at 2.0 mm pitch for the bottom header pins (cf21B connector-pins mesh).
+        for row in (-HEADER_PIN_Y, HEADER_PIN_Y):
+            for k in range(10):
+                x = -9.0 + 2.0*k
+                shape = shape.cut(cq.Solid.makeCylinder(PIN_HOLE_D/2, gp.bracket_t + 2,
+                                                        cq.Vector(x, row, z_bracket - 1), cq.Vector(0, 0, 1)))
+        rods_s = None
         for x, z in tines:
             rod = cq.Solid.makeCylinder(r, y_tip - gp.lead_in - y_face, cq.Vector(x, y_face, z), cq.Vector(0, 1, 0))
             rod = rod.fuse(cq.Solid.makeCone(r, .25*r, gp.lead_in, cq.Vector(x, y_tip - gp.lead_in, z),
                                              cq.Vector(0, 1, 0)))
-            rods = rod if rods is None else rods.fuse(rod)
+            rods_s = rod if rods_s is None else rods_s.fuse(rod)
         if gp.tine_material == 'pla':
-            shape = shape.fuse(rods)
-        bundle.update(shape=shape.clean().translate(cq.Vector(*move)), rods=rods.clean().translate(cq.Vector(*move)))
+            shape = shape.fuse(rods_s)
+        bundle.update(shape=shape.clean(), rods=rods_s.clean())
     return bundle
 
 
@@ -238,9 +253,14 @@ def export(bundle, out):
     from pathlib import Path
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
-    bundle['mesh'].export(out/'gripper.stl')
     if 'shape' in bundle:
+        # Print the fused solid (pin holes included); the collision hull mesh overlaps itself.
+        from .cad import _mesh
+        _mesh(bundle['shape']).export(out/'gripper.stl')
         cq.exporters.export(bundle['shape'], str(out/'gripper_printed.step'))
+    else:
+        bundle['mesh'].export(out/'gripper_collision.stl')
+    if 'shape' in bundle:
         if bundle['params']['tine_material'] != 'pla':
             cq.exporters.export(bundle['rods'], str(out/'gripper_rods.step'))
     return out
