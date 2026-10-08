@@ -309,18 +309,24 @@ class Mission:
                         break
         except MissionAbort as e:
             self.result.status = f'abort:{e}'
-        finally:
+        except BaseException:
+            # Ctrl+C or any unexpected error: land where we are, then stop the motors.
+            self.result.status = 'interrupted'
             if self.flying:
-                self.land()
+                self.flying = False
+                self.emergency_land()
+            raise
+        if self.flying:
+            self.land()
         return self.result
 
     def emergency_land(self):
         """Ctrl+C / exception path: hand back to the high-level commander, land in place, stop."""
         try:
             self._to_high_level()
-            est = self.estimate()
-            z = self.plan['home']['pos'][2] if np.all(np.isfinite(est)) else 0.
-            self.cf.high_level_commander.land(z, self.s['land_s'])
+            self.cf.high_level_commander.land(self.s.get('emergency_land_z', 0.08), self.s['land_s'])
             self.clock.sleep(self.s['land_s'] + 0.5)
         finally:
             self.cf.high_level_commander.stop()
+            if self.arm:
+                self.cf.supervisor.send_arming_request(False)

@@ -274,6 +274,8 @@ def compile_plan(p, structure, brick_bundle, gripper, fp: FixtureParams, drone: 
         'settings': {
             'setpoint_hz': cfg.setpoint_hz, 'transit_z': transit_z, 'takeoff_z': home[2] + cfg.takeoff_mm*MM,
             'takeoff_s': 2.0, 'land_s': 2.5, 'return_s': 3.0, 'settle_s': cfg.settle_s,
+            # Ctrl+C lands in place: low enough that the gripper (hanging below the legs) nearly touches the floor.
+            'emergency_land_z': (hang + 10.)*MM,
             'max_pick_retries': cfg.max_pick_retries, 'max_place_retries': cfg.max_place_retries,
             'ctrl_mass_kg': mass,
             # The mission judges seating through the noisy camera: widen the sim's tolerance by 3 sigma.

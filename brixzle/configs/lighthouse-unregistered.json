@@ -6,11 +6,10 @@
   "_derivation": "bias_sigma_mm: per-axis sigma s of an isotropic 3D Gaussian has mean Euclidean norm 1.596 s; Sec. VI's ~1 cm average gives s = 6.3 mm (lighthouse-pessimistic.json uses Sec. V's 2 cm lower bound: s = 12.5 mm). jitter_mm: Table III LH2 EKF.",
   "_assumptions": "bias_gradient_mm_per_m, vel_noise_mps, att_noise_deg and latency_s are NOT from a source; they are modelling assumptions, varied in the sensitivity objective.",
   "bias_sigma_mm": 6.3,
-  "bias_gradient_mm_per_m": 0.0,
+  "bias_gradient_mm_per_m": 10.0,
   "jitter_mm": 0.7,
   "vel_noise_mps": 0.005,
   "att_noise_deg": 0.1,
   "latency_s": 0.01,
-  "registered": true,
-  "_bias": "Default (decided 2026-10-08): the build area is surveyed in the Lighthouse frame and no residual bias is assumed until it is measured in the first real flights. lighthouse-unregistered.json keeps the Taffanel-derived bias (6.3 mm per axis) and the assumed 10 mm/m gradient; lighthouse-registered.json keeps the gradient with the constant bias removed."
+  "registered": false
 }

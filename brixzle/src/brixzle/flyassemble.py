@@ -227,16 +227,27 @@ class Harness:
         r = (T._rot(tq).inv()*T._rot(q)).as_euler('xyz', degrees=True)
         return r.tolist()
 
-    def run(self, keep_going=None):
+    def run(self, keep_going=None, poses=None, recorder=None):
+        """Fly the plan. ``poses`` replaces the simulated camera (e.g. a scripted one) and
+        ``recorder`` (``flight.fake.Recorder``) logs every cflib call, for parity tests."""
         keep = self.cfg.keep_going if keep_going is None else keep_going
         cf = SimCrazyflie(world=self.world)
+        if recorder is not None:
+            from flight.fake import record
+            record(cf, recorder)
+        camera = poses if poses is not None else self.camera
+
+        def on_event(e):
+            self.on_event(e)
+            if hasattr(camera, 'on_event'):
+                camera.on_event(e)
 
         def swap():
             self.swaps += 1
             self.world.flight_s = 0.
         with SimSyncCrazyflie('sim://brixzle', cf=cf) as scf:
-            mission = Mission(scf, self.plan, SimClock(self.world), self.camera, SimLogConfig,
-                              on_event=self.on_event, on_battery_swap=swap, keep_going=keep)
+            mission = Mission(scf, self.plan, SimClock(self.world), camera, SimLogConfig,
+                              on_event=on_event, on_battery_swap=swap, keep_going=keep)
             result = mission.run()
         return self.summary(result)
 

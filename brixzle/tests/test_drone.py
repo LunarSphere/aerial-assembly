@@ -88,7 +88,7 @@ def test_controller_matches_crazyflow_reference():
 
 
 def test_lighthouse_bias_and_latency():
-    m = LighthouseModel(bias_sigma_mm=10, bias_gradient_mm_per_m=0, jitter_mm=0, vel_noise_mps=0, att_noise_deg=0,
+    m = LighthouseModel(bias_sigma_mm=10, bias_gradient_mm_per_m=0, jitter_mm=0, vel_noise_mps=0, att_noise_deg=0, registered=False,
                         latency_s=0.01)
     lh = Lighthouse(m, np.random.default_rng(3), dt=0.002)
     q = np.array([0, 0, 0, 1.])

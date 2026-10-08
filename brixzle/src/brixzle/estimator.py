@@ -18,12 +18,12 @@ from .cf.rot import mat_to_quat, quat_to_mat, rotvec_to_mat
 @dataclass(frozen=True)
 class LighthouseModel:
     bias_sigma_mm: float = 6.3            # per-axis sigma of the per-flight constant bias (Taffanel 2021)
-    bias_gradient_mm_per_m: float = 10.0  # per-axis sigma of the linear bias field
+    bias_gradient_mm_per_m: float = 0.0   # per-axis sigma of the linear bias field (unmeasured; 0 until IRL)
     jitter_mm: float = 0.7                # white position noise (LH2 EKF static jitter)
     vel_noise_mps: float = 0.005          # white velocity-estimate noise (assumption)
     att_noise_deg: float = 0.1            # attitude-estimate noise (assumption; IMU-driven)
     latency_s: float = 0.01               # estimate delay (assumption)
-    registered: bool = False              # build area surveyed in the Lighthouse frame
+    registered: bool = True               # build area surveyed in the Lighthouse frame
     scale: float = 1.0                    # multiplies every noise term (sensitivity study)
 
     def __post_init__(self):
