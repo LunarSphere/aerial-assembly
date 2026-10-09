@@ -52,3 +52,24 @@ def test_gripper_rods_are_convex_and_export(brick, tmp_path):
     Gr.export(g, tmp_path)
     assert (tmp_path/'gripper.stl').exists() and (tmp_path/'gripper_printed.step').exists()
     assert g['shape'].isValid() and g['rods'].isValid()
+
+
+def test_pressed_msh2_30_pins_fit_their_length_and_export_a_coupon(brick, tmp_path):
+    import json
+    from pathlib import Path
+    d = json.loads((Path(__file__).parents[1]/'configs'/'gripper-fork-msh2-30.json').read_text())
+    gp = Gr.params_from_dict(d)
+    g = Gr.build_gripper(gp, brick, V0)
+    m = Gr.gripper_rules(gp, g, brick, V0, CF21B)
+    assert Gr.feasible(m), {k: v for k, v in m.items() if v < 0}
+    # Exposed tine + press depth is the bought pin; the pin ends flush with the boss's back face.
+    assert np.isclose(gp.exposed(V0) + g['press_depth'], 30.)
+    assert np.isclose(g['shape'].BoundingBox().ymin, g['y_face'] - g['press_depth'], atol=1e-6)
+    Gr.export(g, tmp_path)
+    assert (tmp_path/'press_coupon.stl').exists() and (tmp_path/'gripper_rods.step').exists()
+
+
+def test_tines_stopping_before_the_brick_com_violate_tine_past_com(brick):
+    gp = replace(Gr.ForkParams(), protrude=-12.)
+    g = Gr.build_gripper(gp, brick, V0, solid=False)
+    assert Gr.gripper_rules(gp, g, brick, V0, CF21B)['tine_past_com'] < 0

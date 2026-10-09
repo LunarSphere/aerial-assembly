@@ -1,0 +1,6 @@
+{
+  "_comment": "Fixture with 3 mm tine guides, so the MSH2-30 fork's plate (gap 5) stays behind the guide mouth.",
+  "fixture": {
+    "funnel_len": 3.0
+  }
+}
