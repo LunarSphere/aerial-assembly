@@ -135,8 +135,8 @@ class SensingTests(unittest.TestCase):
             p.write_text(json.dumps({'b0_0': {'pos': [0.1, 0.2, 0.0], 'quat': [0, 0, 0, 1]}}))
             poses = JsonPoseSource(p).poses()
         self.assertAlmostEqual(abs(poses['b0_0'].yaw), np.pi)
-        with self.assertRaises(NotImplementedError):
-            RealSensePoseSource()
+        with self.assertRaises(FileNotFoundError):       # no calib/camera_pose.json next to this rig
+            RealSensePoseSource(Path(__file__).parent/'data'/'no-rig.json')
 
     def test_pose_compose_inverse(self):
         a = Pose((0.1, -0.2, 0.3), (np.cos(0.4), 0, 0, np.sin(0.4)))

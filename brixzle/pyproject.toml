@@ -24,9 +24,15 @@ dependencies = [
 [project.optional-dependencies]
 test = ["pytest>=8,<10"]
 video = ["pillow>=12,<13", "imageio>=2.37,<3", "imageio-ffmpeg>=0.6,<1"]
+# macOS: the pyrealsense2-macosx wheel segfaults on macOS 26; build 2.58.4 with scripts/build_pyrealsense_macos.sh
+testflight = [
+    "opencv-python-headless>=4.9,<5",
+    "pyrealsense2>=2.55 ; sys_platform != 'darwin'",
+]
 
 [project.scripts]
 brixzle = "brixzle.cli:main"
+testflight = "testflight.cli:main"
 
 [tool.uv.sources]
 aerial-assembly = { path = "../simulation", editable = true }

@@ -18,6 +18,9 @@ def parse_args(argv=None):
     ap.add_argument('--check-only', action='store_true', help='hardware: connect and run the preflight, never arm')
     ap.add_argument('--arm', action='store_true', help='hardware: arm and fly (supervised flights only)')
     ap.add_argument('--poses', help='hardware: brick poses JSON (manual camera fallback)')
+    ap.add_argument('--realsense', metavar='RIG', help='hardware: sense poses with the overhead RealSense '
+                    '(brixzle/src/testflight/rig.json)')
+    ap.add_argument('--replay', nargs='*', help='with --realsense: replay saved captures instead of the camera')
     ap.add_argument('--keep-going', action='store_true')
     ap.add_argument('--seed', type=int, default=0, help='sim: noise seed')
     ap.add_argument('--out', help='sim: new directory for the log, summary and video')
@@ -28,6 +31,8 @@ def parse_args(argv=None):
         ap.error('--arm/--check-only apply to real hardware only')
     if args.arm and args.check_only:
         ap.error('choose one of --check-only and --arm')
+    if args.poses and args.realsense:
+        ap.error('choose one of --poses and --realsense')
     return args
 
 
@@ -64,11 +69,19 @@ def main(argv=None):
                 for c in calls:
                     print(' '.join(json.dumps(x) if not isinstance(x, str) else x for x in c))
             return 0
-        if args.arm and not args.poses:
-            sys.exit('--arm needs --poses (the RealSense pipeline is not implemented)')
-        from .sensing import JsonPoseSource
-        poses = JsonPoseSource(args.poses) if args.poses else None
-        hardware.fly(plan, args.uri, poses, arm=args.arm, keep_going=args.keep_going)
+        if args.arm and not (args.poses or args.realsense):
+            sys.exit('--arm needs --realsense rig.json (or --poses poses.json)')
+        from .sensing import JsonPoseSource, RealSensePoseSource
+        if args.realsense:
+            poses = RealSensePoseSource(args.realsense, args.replay)
+            print(f'camera sees: {json.dumps({k: v.to_dict() for k, v in poses.poses().items()})}')
+        else:
+            poses = JsonPoseSource(args.poses) if args.poses else None
+        try:
+            hardware.fly(plan, args.uri, poses, arm=args.arm, keep_going=args.keep_going)
+        finally:
+            if hasattr(poses, 'close'):
+                poses.close()
         return 0
     except KeyboardInterrupt:
         return 130

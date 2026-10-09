@@ -17,7 +17,7 @@ uv run fly runs/plan-single/plan.json --uri radio://0/80/2M/E7E7E7E7E7 [--show-c
 # Connect and run the preflight only (never arms)
 uv run fly runs/plan-single/plan.json --uri radio://0/80/2M/E7E7E7E7E7 --check-only
 # Supervised flight only
-uv run fly runs/plan-single/plan.json --uri radio://0/80/2M/E7E7E7E7E7 --arm --poses poses.json
+uv run fly runs/plan-single/plan.json --uri radio://0/80/2M/E7E7E7E7E7 --arm --realsense src/testflight/rig.json
 ```
 
 Real-hardware behaviour:
@@ -33,8 +33,9 @@ Real-hardware behaviour:
   each firmware `go_to` piece and streamed segment, setpoint rate >= 10 Hz (watchdog: 0.5 s level, 2 s off).
 - **Ctrl+C or any exception**: hand back to the high-level commander, land in place to
   `emergency_land_z`, `stop()`, disarm.
-- **Camera**: the RealSense pipeline is not implemented (`RealSensePoseSource` raises);
-  `--poses poses.json` is a manual fallback `{name: {"pos": [m], "quat": [w, x, y, z]}}`, re-read before
+- **Camera**: `--realsense brixzle/src/testflight/rig.json` senses the brick and the platform with the overhead
+  D455 before every pick and check (see `brixzle/src/testflight/README.md`; `--replay DIR...` replays captures).
+  `--poses poses.json` remains as a manual fallback `{name: {"pos": [m], "quat": [w, x, y, z]}}`, re-read before
   every pick and check.
 
 Later validation path (not built): CrazySim (https://github.com/gtfactslab/CrazySim) runs the real firmware

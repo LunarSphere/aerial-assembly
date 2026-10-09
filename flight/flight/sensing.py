@@ -30,11 +30,24 @@ class JsonPoseSource:
 
 
 class RealSensePoseSource:
-    """Placeholder for the overhead Intel RealSense pipeline (out of scope for experiment 2)."""
+    """The overhead Intel RealSense D455 (``brixzle/src/testflight``): poses() senses the brick and
+    the platform by colour + depth before every pick and check.
 
-    def __init__(self, *args, **kwargs):
-        raise NotImplementedError('The RealSense brick-pose pipeline is not implemented; use JsonPoseSource '
-                                  '(--poses poses.json) to enter brick poses by hand.')
+    ``rig``: path to ``testflight/rig.json`` (its ``calib/`` holds the camera pose). ``capture``:
+    saved capture directories to replay instead of the live camera. Imported lazily, like ``--sim``:
+    the ``testflight`` package lives in the brixzle environment.
+    """
+
+    def __init__(self, rig, capture=None):
+        try:
+            from testflight.sense import make_source
+        except ImportError as e:
+            raise ImportError('RealSensePoseSource needs the brixzle environment with the testflight extra '
+                              '(cd brixzle && uv sync --extra testflight)') from e
+        self.source = make_source(rig, capture)
 
     def poses(self):
-        raise NotImplementedError
+        return self.source.poses()
+
+    def close(self):
+        self.source.close()

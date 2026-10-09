@@ -206,6 +206,9 @@ def compile_plan(p, structure, brick_bundle, gripper, fp: FixtureParams, drone: 
     """Return (plan, layout). ``bricks`` limits the plan to the first n bricks of the order."""
     from flight.frames import Pose
     outer = {'A': brick_bundle['outer']}
+    if p.lean_mode == 'ab':            # the order needs B's outline for odd courses
+        from . import profile as pr
+        outer['B'] = pr.brick_parts(p, 'B')['outer']
     order = L.assembly_order(p, structure, outer)
     order = order[:bricks] if bricks else order
     graph = L.connectivity(structure)

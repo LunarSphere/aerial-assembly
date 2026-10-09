@@ -1,0 +1,27 @@
+{
+ "_comment": "Lab config for the test flight; any key of testflight.rig.DEFAULTS can be overridden here. Measured values live in calib/.",
+ "calibration_dir": "calib",
+ "log_dir": "../../runs/testflight-log",
+ "tags": {
+  "dictionary": "DICT_APRILTAG_25h9",
+  "ids": [
+   0,
+   1,
+   2,
+   3,
+   4,
+   5
+  ]
+ },
+ "yaw_prior_deg": {
+  "brick": 0.0,
+  "platform": 0.0,
+  "fixture": 0.0
+ },
+ "camera": {
+  "_comment": "USB 2 link (D455 on this Mac): 1280x720 depth only at 5 Hz. On USB 3 use fps 30, frames 8.",
+  "fps": 5,
+  "frames": 6,
+  "warmup_frames": 10
+ }
+}

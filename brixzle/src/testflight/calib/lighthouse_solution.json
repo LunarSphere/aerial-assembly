@@ -1,0 +1,45 @@
+{
+ "ok": true,
+ "base_stations": {
+  "0": {
+   "pos_m": [
+    0.057535991916260236,
+    -1.2295344121750007,
+    1.4296003896442997
+   ],
+   "yaw_deg": 89.51483668583532,
+   "pitch_deg": 6.325818631089798,
+   "roll_deg": 3.6588927757716716
+  },
+  "1": {
+   "pos_m": [
+    0.11883060838464093,
+    2.887094612480347,
+    1.7123477418183561
+   ],
+   "yaw_deg": -99.620818089029,
+   "pitch_deg": 16.714031227372907,
+   "roll_deg": -0.08213627529239478
+  }
+ },
+ "samples": {
+  "x_axis": 1,
+  "xy_plane": 1,
+  "xyz_space": 0,
+  "verification": 0
+ },
+ "error_mm": {
+  "mean": 4.269345209849266,
+  "max": 5.346259824101668
+ },
+ "xy_plane_sample_m": [
+  -0.4326098897789584,
+  1.706358634860171,
+  6.892716531067142e-12
+ ],
+ "warnings": [
+  "no xyz-space samples: add 10-20 (drone carried around the pick/place area at 0-30 cm) so the solver is not fitting 3 poses",
+  "no verification samples: add a few to get an independent error estimate",
+  "scale comes from the x-axis sample being exactly 1.000 m from the origin: tape-check it (1 cm off = 1 % scale = 5 mm at 0.5 m)"
+ ]
+}
