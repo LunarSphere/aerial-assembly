@@ -1,0 +1,64 @@
+{
+  "params": {
+    "family": "fork",
+    "tine_d": 2.0,
+    "tine_material": "steel",
+    "protrude": -6.0,
+    "lead_in": 1.0,
+    "gap": 5.0,
+    "clear_guard": 8.0,
+    "plate_t": 1.6,
+    "plate_margin": 3.0,
+    "bracket_t": 2.0,
+    "detent_h": 0.0,
+    "pin_length": 30.0,
+    "press_d": 1.9,
+    "boss_d": 5.0
+  },
+  "mass_g": 6.323699822011288,
+  "com_mm": [
+    -5.723596466361773,
+    -7.6835113765253205,
+    -17.916677643863906
+  ],
+  "carry_mm": [
+    3.977455615158698,
+    3.5434594935584416,
+    -59.21325723564367
+  ],
+  "tines_mm": [
+    [
+      -18.2725443848413,
+      -36.03482755730144
+    ],
+    [
+      6.477455615158698,
+      -35.78482755730144
+    ]
+  ],
+  "payload_g": 20.035785317127544,
+  "thrust_to_weight": {
+    "datasheet": 1.813832325496855,
+    "crazyflow": 1.2330607243350475
+  },
+  "margins": {
+    "payload_limit": 9.964214682872456,
+    "thrust_to_weight": 0.3138323254968549,
+    "clears_guards": 6.9999999999999964,
+    "clears_deck": 1.2,
+    "inside_frame": 47.08245561515869,
+    "com_below_drone": 35.783519220352986,
+    "com_on_axis": 2.999999999999967,
+    "printable_wall": 0.40000000000000013,
+    "tine_fits_bore": 0.20000000000000004,
+    "tine_past_com": 3.5,
+    "press_depth": 0.0,
+    "press_interference": 0.10000000000000009,
+    "tine_strength": 92.95635164146371,
+    "tine_stiffness": 0.2995648836536305,
+    "release_tilt": 7.082250621769551,
+    "release_force": 4.534279974342913,
+    "fork_fits": 1.0
+  },
+  "feasible": true
+}

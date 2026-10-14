@@ -1,0 +1,58 @@
+{
+  "params": {
+    "family": "fork",
+    "tine_d": 2.0,
+    "tine_material": "pla",
+    "protrude": 4.0,
+    "lead_in": 2.0,
+    "gap": 8.0,
+    "clear_guard": 8.0,
+    "plate_t": 1.6,
+    "plate_margin": 3.0,
+    "bracket_t": 2.0,
+    "detent_h": 0.0
+  },
+  "mass_g": 5.267523536911034,
+  "com_mm": [
+    -5.9447197230341775,
+    -9.221832003300555,
+    -12.525306704324842
+  ],
+  "carry_mm": [
+    3.6215393035289187,
+    3.5425841786157353,
+    -59.21325723564367
+  ],
+  "tines_mm": [
+    [
+      -18.62846069647108,
+      -36.03482755730144
+    ],
+    [
+      6.121539303528919,
+      -35.78482755730144
+    ]
+  ],
+  "payload_g": 18.97960903202729,
+  "thrust_to_weight": {
+    "datasheet": 1.8432689910796987,
+    "crazyflow": 1.2530720537591424
+  },
+  "margins": {
+    "payload_limit": 11.020390967972709,
+    "thrust_to_weight": 0.34326899107969866,
+    "clears_guards": 6.9999999999999964,
+    "clears_deck": 1.2,
+    "inside_frame": 46.6652737207182,
+    "com_below_drone": 35.281473106472035,
+    "com_on_axis": 2.999999999999998,
+    "printable_wall": 0.40000000000000013,
+    "tine_fits_bore": 0.20000000000000004,
+    "tine_strength": 8.493847378405741,
+    "tine_stiffness": 0.218026832566227,
+    "release_tilt": 7.082250621769551,
+    "release_force": 4.534279974342913,
+    "fork_fits": 1.0
+  },
+  "feasible": true
+}
