@@ -9,8 +9,16 @@ description = "One cflib flight program for the Brixzle pick-and-place mission: 
 requires-python = ">=3.10"
 dependencies = ["cflib==0.1.33", "numpy>=2,<3", "scipy>=1.14,<2"]
 
+[project.optional-dependencies]
+vision = ["opencv-python>=4.10,<5"]
+realsense = ["pyrealsense2>=2.56,<3"]
+detector = ["onnxruntime>=1.20,<2"]
+yolo = ["ultralytics==8.4.177; python_version >= '3.11'", "onnx>=1.16,<2"]
+test = ["pytest>=8,<10"]
+
 [project.scripts]
 fly = "flight.cli:main"
+flight-cal = "flight.calibration.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["flight*"]

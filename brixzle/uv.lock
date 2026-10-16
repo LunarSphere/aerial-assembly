@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = "==3.12.*"
 
 [[package]]
@@ -410,8 +410,15 @@ dependencies = [
 requires-dist = [
     { name = "cflib", specifier = "==0.1.33" },
     { name = "numpy", specifier = ">=2,<3" },
+    { name = "onnx", marker = "extra == 'yolo'", specifier = ">=1.16,<2" },
+    { name = "onnxruntime", marker = "extra == 'detector'", specifier = ">=1.20,<2" },
+    { name = "opencv-python", marker = "extra == 'vision'", specifier = ">=4.10,<5" },
+    { name = "pyrealsense2", marker = "extra == 'realsense'", specifier = ">=2.56,<3" },
+    { name = "pytest", marker = "extra == 'test'", specifier = ">=8,<10" },
     { name = "scipy", specifier = ">=1.14,<2" },
+    { name = "ultralytics", marker = "extra == 'yolo'", specifier = "==8.4.177" },
 ]
+provides-extras = ["vision", "realsense", "detector", "yolo", "test"]
 
 [[package]]
 name = "fonttools"

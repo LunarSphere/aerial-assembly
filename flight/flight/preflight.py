@@ -1,10 +1,8 @@
-"""Hardware preflight, in the style of ``crazyfly/hover.py``: acknowledged param writes,
+"""Hardware preflight: acknowledged param writes,
 deck detection, Kalman reset and variance convergence, battery, and the take-off pose.
 
-Differences from hover.py: the Lighthouse deck (``deck.bcLighthouse4``) replaces the Flow
-deck, the Mellinger controller (2) replaces PID so the real drone runs the controller the
-simulator ports from crazyflow, the high-level commander is enabled, and ``pm.vbat`` is
-checked. Time goes through the injected clock.
+The Lighthouse deck (``deck.bcLighthouse4``), selected controller, high-level
+commander and battery are checked. Time goes through the injected clock.
 """
 from collections import deque
 from contextlib import contextmanager
@@ -53,9 +51,9 @@ def set_parameter(cf, name, value, timeout=5.0):
 
 
 @contextmanager
-def samples(cf, LogConfig, clock, names, period_ms=200):
+def samples(cf, LogConfig, clock, names, period_ms=200, log_name='Brixzle preflight'):
     queue = Queue()
-    config = LogConfig(name='Brixzle preflight', period_in_ms=period_ms)
+    config = LogConfig(name=log_name, period_in_ms=period_ms)
     for n in names:
         config.add_variable(n, 'float')
 
@@ -84,6 +82,7 @@ def wait_for_position(cf, queue, clock, timeout=PREFLIGHT_TIMEOUT):
     """Bitcraze variance criterion (spread < 0.001 over 10 samples) plus a stationary position."""
     deadline = clock.time() + timeout
     history = deque(maxlen=10)
+    last_received = None
     while clock.time() < deadline:
         if not cf.is_connected():
             raise ConnectionError('Disconnected during preflight')
@@ -94,6 +93,12 @@ def wait_for_position(cf, queue, clock, timeout=PREFLIGHT_TIMEOUT):
             continue
         if isinstance(data, Exception):
             raise data
+        if clock.time() - received_at > 1.:
+            history.clear()
+            continue
+        if last_received is not None and received_at - last_received > 1.:
+            history.clear()
+        last_received = received_at
         values = tuple(float(data[n]) for n in VARIANCE_NAMES + POSITION_NAMES)
         if not all(math.isfinite(v) for v in values) or min(values[:3]) < 0:
             raise PreflightError('Invalid estimator telemetry; no arming requested')
@@ -109,27 +114,34 @@ def battery(cf, queue, clock, n=5, timeout=5.0):
     values, deadline = [], clock.time() + timeout
     while len(values) < n and clock.time() < deadline:
         try:
-            _, data = queue.get_nowait()
+            received_at, data = queue.get_nowait()
         except Empty:
             clock.sleep(0.05)
             continue
         if isinstance(data, Exception):
             raise data
-        values.append(float(data['pm.vbat']))
-    if not values:
-        raise TimeoutError('No battery telemetry')
+        value = float(data['pm.vbat'])
+        if clock.time() - received_at > 1.:
+            continue
+        if not math.isfinite(value) or value <= 0:
+            raise PreflightError('Invalid battery telemetry')
+        values.append(value)
+    if len(values) < n:
+        raise TimeoutError('Insufficient fresh battery telemetry')
     return sum(values)/len(values)
 
 
-def run_preflight(scf, plan, LogConfig, clock, vbat_min=VBAT_MIN, home_tolerance=0.15):
+def run_preflight(scf, plan, LogConfig, clock, vbat_min=VBAT_MIN, home_tolerance=0.15, controller=2):
     """Return a report dict; raise PreflightError (no arming) on any failed check."""
     cf = scf.cf
+    if controller not in (1, 2):
+        raise ValueError('Select PID (1) or Mellinger (2)')
     wait_for_parameters(scf, clock)
     if cf.param.toc.get_element_by_complete_name('deck.bcLighthouse4') is None or \
             int(float(cf.param.get_value('deck.bcLighthouse4'))) != 1:
         raise PreflightError('No Lighthouse deck detected (deck.bcLighthouse4); no arming requested')
     set_parameter(cf, 'stabilizer.estimator', 2)    # Kalman (required by the Lighthouse deck)
-    set_parameter(cf, 'stabilizer.controller', 2)   # Mellinger, as simulated (crazyflow port)
+    set_parameter(cf, 'stabilizer.controller', controller)
     set_parameter(cf, 'commander.enHighLevel', 1)
     for name, value in plan['settings'].get('params', {}).items():
         set_parameter(cf, name, value)
@@ -149,4 +161,4 @@ def run_preflight(scf, plan, LogConfig, clock, vbat_min=VBAT_MIN, home_tolerance
     lo, hi = np.asarray(plan['settings']['geofence']['min']), np.asarray(plan['settings']['geofence']['max'])
     if np.any(pos < lo) or np.any(pos > hi):
         raise PreflightError('Drone outside the geofence; no arming requested')
-    return {'position_m': pos.tolist(), 'vbat_V': vbat}
+    return {'position_m': pos.tolist(), 'vbat_V': vbat, 'controller': controller}
