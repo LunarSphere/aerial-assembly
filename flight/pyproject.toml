@@ -10,7 +10,7 @@ requires-python = ">=3.10"
 dependencies = ["cflib==0.1.33", "numpy>=2,<3", "scipy>=1.14,<2"]
 
 [project.optional-dependencies]
-vision = ["opencv-python>=4.10,<5"]
+vision = ["opencv-python>=5.0.0.93,<6"]
 realsense = ["pyrealsense2>=2.56,<3"]
 detector = ["onnxruntime>=1.20,<2"]
 yolo = ["ultralytics==8.4.177; python_version >= '3.11'", "onnx>=1.16,<2"]
