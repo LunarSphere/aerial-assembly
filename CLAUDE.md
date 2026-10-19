@@ -49,4 +49,4 @@ Tests mock cflib; they never open a radio.
 
 ## CI
 
-`.github/workflows/tests.yml` runs the `flight` and `brixzle` pytest jobs on PRs and pushes to `master`. Dependabot (`.github/dependabot.yml`) bumps uv and GitHub Actions weekly.
+`.github/workflows/tests.yml` runs the `flight` and `brixzle` pytest jobs on PRs and pushes to `master`. Dependabot (`.github/dependabot.yml`) bumps uv and GitHub Actions weekly; `dependabot-automerge.yml` auto-merges minor/patch bumps once checks pass and leaves major bumps for manual review.
