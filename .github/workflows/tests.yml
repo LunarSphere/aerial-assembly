@@ -1,0 +1,40 @@
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  flight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: flight/uv.lock
+      - run: uv run --project flight --extra test --extra vision pytest flight/tests -q
+
+  brixzle:
+    runs-on: ubuntu-latest
+    env:
+      MUJOCO_GL: disable
+    defaults:
+      run:
+        working-directory: brixzle
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: brixzle/uv.lock
+      - run: uv sync --extra test
+      - run: uv run pytest -q

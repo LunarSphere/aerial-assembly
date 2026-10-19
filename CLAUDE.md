@@ -42,3 +42,11 @@ Tests mock cflib; they never open a radio.
 
 - SI units; quaternions are `[w, x, y, z]` everywhere. Convert to scipy/crazyflow's scalar-last order only via `flight/flight/frames.py` (`wxyz_to_xyzw`).
 - Four-space indent, `snake_case`, dataclasses for settings, explicit input validation, finite JSON. No formatter or linter configured.
+
+## Repo map
+
+`.claude/REPO_MAP.md` maps the modules. When you add, remove, rename, or change the role of a module or directory, update it in the same change.
+
+## CI
+
+`.github/workflows/tests.yml` runs the `flight` and `brixzle` pytest jobs on PRs and pushes to `master`. Dependabot (`.github/dependabot.yml`) bumps uv and GitHub Actions weekly.
