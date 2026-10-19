@@ -4,6 +4,9 @@ updates:
     directory: /brixzle
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
       python-deps:
         update-types: [minor, patch]
@@ -11,6 +14,9 @@ updates:
     directory: /flight
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
       python-deps:
         update-types: [minor, patch]
@@ -18,3 +24,6 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
