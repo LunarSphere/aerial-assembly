@@ -188,10 +188,8 @@ def collect(cf, stations, timeout=20., diagnostics_path=None):
 
 
 def solve(raw):
-    skip_verification = raw.get('verification_skipped') is True
-    skip_geometry = raw.get('geometry_skipped') is True
-    if skip_geometry and not skip_verification:
-        raise ValueError('Reference-only estimation must also be marked unverified')
+    # Reference-only: just the origin, +X and XY placements, no extra or check samples.
+    skip_verification = skip_geometry = raw.get('reference_only') is True
     from cflib.localization.lighthouse_bs_vector import LighthouseBsVector, LighthouseBsVectors
     from cflib.localization.lighthouse_cf_pose_sample import LhCfPoseSample
     from cflib.localization.lighthouse_geo_estimation_manager import LhGeoInputContainerData, LhGeoEstimationManager
@@ -241,7 +239,7 @@ def solve(raw):
     def stats(s):
         return None if s is None else {k: float(v) if np.isfinite(v) else None for k, v in s._asdict().items()}
     return dict(version=1, accepted=accepted, converged=bool(result.has_converged),
-                fit_valid=fit_valid, verification_skipped=skip_verification, geometry_skipped=skip_geometry,
+                fit_valid=fit_valid, reference_only=skip_geometry,
                 progress_ok=bool(result.progress_is_ok), progress=result.progress_info,
                 verification_limit_m=LIMIT_M, max_verification_error_m=maximum,
                 coverage_ok=bool(coverage), estimation_stats=stats(result.error_stats),

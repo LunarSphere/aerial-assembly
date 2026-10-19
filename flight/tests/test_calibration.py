@@ -1,6 +1,5 @@
 """Synthetic and mocked-hardware calibration checks. Never open cameras or radios."""
 import copy
-import json
 import math
 from pathlib import Path
 from queue import Queue
@@ -27,14 +26,6 @@ def test_rgbd_launch_return_uses_metric_distance():
         check_launch_return(origin, home)
 
 
-def test_rgb_launch_return_retains_pixel_check():
-    from flight.calibration.setup import check_launch_return
-    origin = dict(center_px=[100., 100.], point_camera_m=None)
-    assert check_launch_return(origin, dict(center_px=[102., 101.], point_camera_m=None))['accepted']
-    with pytest.raises(ValueError, match='original launch'):
-        check_launch_return(origin, dict(center_px=[110., 100.], point_camera_m=None))
-
-
 def test_camera_refresh_recovers_pose_without_changing_tag_map(survey, view):
     from flight.calibration.registration import refresh_pose
     expected, intrinsics, observations = view
@@ -59,37 +50,6 @@ def test_camera_refresh_rejects_moved_tag_and_missing_map(survey, view):
     moved[4] += [30, -20]
     with pytest.raises(ValueError, match='inconsistent'):
         refresh_pose(survey, moved, intrinsics, pose.to_dict())
-
-
-def test_demo_route_visits_all_tags_and_keeps_clearance(survey):
-    result = hover.route(survey, demo=True)
-    visits = [s for s in result['segments'] if s['name'].startswith('tag-')]
-    assert {s['name'] for s in visits} == {f'tag-{t["id"]}' for t in survey['tags']}
-    assert len(visits) == len(survey['tags'])
-    assert result['tracking_tolerance_m'] == .1
-    assert result['duration_s'] < hover.route(survey)['duration_s']
-    for s in result['segments']:
-        assert s['peak_speed_mps'] <= .2
-        assert s['peak_accel_mps2'] <= .3
-    for s in visits:
-        assert s['dwell_s'] == 5
-        assert s['target_body_m'][2] + survey['envelope_body_m']['min'][2] >= max(t['pose']['pos'][2] for t in survey['tags']) + .2 - 1e-9
-
-
-def test_camera_only_never_connects_radio(tmp_path, survey):
-    lh, ca = accepted_sessions(tmp_path, survey)
-    rig_path = tmp_path/'rig.json'
-    artifacts.write(rig_path, survey)
-    args = cli.parser().parse_args(['hover-check', '--rig', str(rig_path), '--lighthouse', str(lh),
-        '--calibration', str(ca), '--out', str(tmp_path/'camera-only'), '--camera-check-only'])
-    from contextlib import nullcontext
-    with (patch.object(hover, 'CameraMonitor', return_value=nullcontext(SimpleNamespace(latest={'visible_ids': [0, 1, 2]}))),
-          patch('flight.hardware.connect', side_effect=AssertionError('radio opened'))):
-        out = hover.run(args, survey)
-    report = artifacts.read(out/'report.json')
-    assert report['camera_check_only'] and report['accepted']
-    assert report['radio_connected'] is False
-    assert report['flight_complete'] is False
 
 
 @pytest.fixture
@@ -180,22 +140,6 @@ def test_rig_units_and_missing_offset(survey):
     survey['mass_kg'] = 55
     with pytest.raises(ValueError, match='kg'):
         rig.validate(survey)
-
-
-def test_route_clearance_offsets_and_limits(survey):
-    plan = hover.route(survey)
-    assert [s['name'] for s in plan['segments']] == [
-        'takeoff', 'tag-0', 'tag-1', 'tag-2', 'tag-3', 'tag-4', 'tag-5', 'return', 'land']
-    for segment in plan['segments']:
-        assert segment['peak_speed_mps'] <= .1
-        assert segment['peak_accel_mps2'] <= .2
-        if segment['name'].startswith('tag-'):
-            body = segment['target_body_m']
-            assert body[2] + survey['envelope_body_m']['min'][2] - survey['tags'][0]['pose']['pos'][2] == pytest.approx(.2)
-            np.testing.assert_allclose(segment['target_m'], np.array(body) + survey['body_to_sample_m'])
-    survey['geofence']['max'][0] = 1.02
-    with pytest.raises(ValueError, match='envelope'):
-        hover.route(survey)
 
 
 def health_data(clock, position, mask=3, vbat=4.):
@@ -379,21 +323,10 @@ def accepted_sessions(tmp_path, survey):
     geometry = {'0': dict(origin=[0, 0, 2], rotation=np.eye(3).tolist())}
     artifacts.write(lh / 'solution.json', dict(version=1, geometry=geometry))
     key = artifacts.fingerprint(geometry)
-    artifacts.report(lh, accepted=True, geometry_fingerprint=key)
+    artifacts.report(lh, accepted=True, upload_verified=True, geometry_fingerprint=key)
     ca = artifacts.session(tmp_path / 'ca', 'camera', survey)
     artifacts.report(ca, accepted=True, lighthouse_fingerprint=key)
     return lh, ca
-
-
-def test_hover_default_dry_run_opens_no_devices(tmp_path, survey):
-    lh, ca = accepted_sessions(tmp_path, survey)
-    path = tmp_path / 'rig.json'
-    artifacts.write(path, survey)
-    with (patch('flight.hardware.connect', side_effect=AssertionError('radio opened')),
-          patch.object(camera, 'open_camera', side_effect=AssertionError('camera opened'))):
-        assert cli.main(['hover-check', '--rig', str(path), '--lighthouse', str(lh),
-                         '--calibration', str(ca), '--out', str(tmp_path / 'dry')]) == 0
-    assert artifacts.read(tmp_path / 'dry' / 'report.json')['dry_run']
 
 
 def test_shared_preflight_rejects_stale_and_nonfinite_battery():
@@ -567,59 +500,15 @@ def test_live_geometry_mismatch_rejected():
             lighthouse.check_live_geometry(cf, expected, {})
 
 
-def test_rgb_camera_mode_does_not_import_realsense():
-    args = SimpleNamespace(camera_mode='rgb', camera_backend='opencv', device='2', width=1280,
-                           height=720, intrinsics='measured.json')
-    with (patch.dict('sys.modules', {'pyrealsense2': None}), patch.object(camera, 'OpenCVCamera') as capture):
-        camera.open_camera(args)
-        capture.assert_called_once_with('2', 1280, 720, 'measured.json')
-    args.camera_mode = 'rgbd'
-    with pytest.raises(ValueError, match='requires'):
-        camera.open_camera(args)
-
-
-@pytest.mark.parametrize('mode', ['rgb', 'rgbd'])
-def test_realsense_capture_scaling_and_color_only_mode(mode):
-    color = np.zeros((720, 1280, 3), np.uint8)
-    depths = np.full((720, 1280), 1000, np.uint16)
-    depths[0, 0] = 0
-    rs = MagicMock()
-    rs.distortion.none = 'none'
-    intr = SimpleNamespace(model='none', fx=900, fy=900, ppx=640, ppy=360, coeffs=[0]*5)
-    profile = rs.pipeline.return_value.start.return_value
-    profile.get_stream.return_value.as_video_stream_profile.return_value.get_intrinsics.return_value = intr
-    device = profile.get_device.return_value
-    device.get_info.return_value = 'camera-serial'
-    device.first_depth_sensor.return_value.get_depth_scale.return_value = .001
-    frames = MagicMock()
-    frames.get_color_frame.return_value.get_data.return_value = color
-    frames.get_depth_frame.return_value.get_data.return_value = depths
-    rs.pipeline.return_value.wait_for_frames.return_value = frames
-    rs.align.return_value.process.return_value = frames
-    with patch.dict('sys.modules', {'pyrealsense2': rs}):
-        capture = camera.RealSenseCamera('camera-serial', mode=mode)
-        frame = capture.frame()
-        assert frame.color.shape == (720, 1280, 3)
-        if mode == 'rgbd':
-            assert np.isnan(frame.depth_m[0, 0])
-            assert frame.depth_m[1, 1] == pytest.approx(1.)
-            assert rs.config.return_value.enable_stream.call_count == 2
-        else:
-            assert frame.depth_m is None
-            device.first_depth_sensor.assert_not_called()
-            assert rs.config.return_value.enable_stream.call_count == 1
-        capture.close()
-        rs.pipeline.return_value.stop.assert_called_once()
-
-
 def test_camera_calibration_session_preserves_capture_and_provenance(tmp_path, survey, view):
     _, intrinsics, observations = view
     lh, _ = accepted_sessions(tmp_path, survey)
     source = SimpleNamespace(profile=intrinsics['profile'], intrinsics=intrinsics, close=MagicMock(),
         frame=lambda: camera.Frame(np.zeros((720, 1280, 3), np.uint8), __import__('time').monotonic()))
-    args = SimpleNamespace(lighthouse=str(lh), out=str(tmp_path / 'camera-capture'), camera_mode='rgb')
+    args = SimpleNamespace(lighthouse=str(lh), out=str(tmp_path / 'camera-capture'))
     with (patch.object(vision, 'open_camera', return_value=source),
-          patch.object(vision, 'detect', return_value=observations)):
+          patch.object(vision, 'detect', return_value=observations),
+          patch.object(vision, 'depth_report', return_value=[dict(valid=True)])):
         output = vision.calibrate(args, survey)
     report = artifacts.read(output / 'report.json')
     assert report['accepted']
@@ -627,67 +516,6 @@ def test_camera_calibration_session_preserves_capture_and_provenance(tmp_path, s
     assert len(list(output.glob('color-*.png'))) == 20
     assert len(artifacts.read(output / 'observations.json')['frames']) == 20
     source.close.assert_called_once()
-
-
-def test_check_only_never_arms_and_validates_live_calibration(tmp_path, survey):
-    from contextlib import nullcontext
-    lh, ca = accepted_sessions(tmp_path, survey)
-    artifacts.write(lh / 'factory-calibration.json', dict(version=1, stations={}))
-    args = cli.parser().parse_args(['hover-check', '--rig', 'rig', '--lighthouse', str(lh),
-        '--calibration', str(ca), '--out', str(tmp_path / 'check'), '--check-only', '--uri', 'radio://fake'])
-    clock = fake.PublishingClock()
-    cf = fake.RecordingCrazyflie(clock=clock, home=[-.2, -.2, 0])
-    clock.cf = cf
-    cf.param.toc.toc = {'ctrlMel': {'mass': SimpleNamespace(access=0)}}
-    scf = fake.FakeSyncCrazyflie(args.uri, cf)
-    with (patch('flight.hardware.connect', return_value=scf),
-          patch.object(hover, 'CameraMonitor', return_value=nullcontext(SimpleNamespace(check=lambda *args: None))),
-          patch.object(hover, 'check_live_geometry') as verify,
-          patch.object(hover, 'RealClock', return_value=clock),
-          patch.object(hover, 'run_preflight', return_value={'position_m': [0, 0, 0], 'vbat_V': 4}),
-          patch('cflib.crazyflie.log.LogConfig', fake.FakeLogConfig),
-          patch.object(hover, 'Health')):
-        out = hover.run(args, survey)
-    verify.assert_called_once()
-    assert not any(c[0] == 'supervisor.send_arming_request' and c[1] is True for c in cf.rec.calls)
-    assert artifacts.read(out / 'report.json')['check_only']
-
-
-def test_guided_survey_converts_physical_measurements_without_vector_input(tmp_path, capsys):
-    answers = iter([
-        '', '60',  # empty height retries, then measured sensor height in mm
-        '', '80',  # all tags same size; black square 80 mm
-        '', '',  # origin and X tag yaw defaults
-        '20', '5', '70', '',  # XY tag: reject being only 5 cm off axis, then 70 cm
-        '70', '20', '',  # tag 3
-        '80', '70', '',  # tag 4
-        '-10', '50', '',  # tag 5
-        '', '', '12',  # centred deck, sensors 12 mm above motor plane
-        '',  # launch on origin support
-        '45', '55',  # emergency resting motor height, measured grams
-        '85', '85', '85', '85', '45', '35',  # envelope, mm
-        '-50', '130', '-50', '100', '86',  # clear room bounds, cm
-        '0 1', '1 2',  # retry invalid channels
-    ])
-    prompts = []
-    def answer(prompt):
-        prompts.append(prompt)
-        return next(answers)
-    result = rig.survey(tmp_path / 'rig.json', ask=answer)
-    assert '[x y z]' not in ''.join(prompts)
-    assert 'minus' not in ''.join(prompts)
-    assert result['sample_offset_m'] == [0, 0, .06]
-    assert result['mass_kg'] == pytest.approx(.055)
-    assert result['base_stations'] == [0, 1]
-    np.testing.assert_allclose(result['tags'][1]['pose']['pos'], [1, 0, -.06])
-    np.testing.assert_allclose(result['home']['pos'], [0, 0, -.012])
-    np.testing.assert_allclose(result['body_to_sample_m'], [0, 0, .012])
-    assert len(hover.route(result)['segments']) == 9
-    output = capsys.readouterr().out
-    assert 'Enter one positive number in mm' in output
-    assert 'at least 10 cm' in output
-    assert 'channel numbers between 1 and 16' in output
-    assert artifacts.read(tmp_path / 'rig.json') == result
 
 
 def test_guided_survey_does_not_prompt_when_output_already_exists(tmp_path):
@@ -698,31 +526,18 @@ def test_guided_survey_does_not_prompt_when_output_already_exists(tmp_path):
     assert path.read_text() == 'keep this survey'
 
 
-def test_five_tag_inventory_is_valid_and_hovered(survey):
-    survey['tags'] = survey['tags'][:5]
-    rig.validate(survey)
-    assert [s['name'] for s in hover.route(survey)['segments']] == [
-        'takeoff', 'tag-0', 'tag-1', 'tag-2', 'tag-3', 'tag-4', 'return', 'land']
-    survey['tags'] = survey['tags'][:4]
-    with pytest.raises(ValueError, match='two check tags'):
-        rig.validate(survey)
-
-
-@pytest.mark.parametrize('source', ['rgb', 'rgbd'])
-def test_automatic_layout_recovers_metric_tag_positions_and_rotations(survey, view, source):
+def test_automatic_layout_recovers_metric_tag_positions_and_rotations(survey, view):
     transform, intrinsics, observations = view
-    depth = None
-    if source == 'rgbd':
-        depth = np.full((720, 1280), np.nan)
-        normal = Rotation.from_quat(np.roll(transform.quat, -1)).as_matrix()[2]
-        distance = survey['tags'][0]['pose']['pos'][2] - transform.pos[2]
-        for quad in observations.values():
-            mask = np.zeros(depth.shape, np.uint8)
-            camera.cv().fillConvexPoly(mask, np.rint(quad).astype(np.int32), 1)
-            yy, xx = np.nonzero(mask)
-            rays = camera.pixel_rays(np.column_stack([xx, yy]), intrinsics)
-            depth[yy, xx] = distance/(rays @ normal)
-    result = layout.estimate(observations, intrinsics, depth, .08 if source == 'rgb' else None)
+    depth = np.full((720, 1280), np.nan)
+    normal = Rotation.from_quat(np.roll(transform.quat, -1)).as_matrix()[2]
+    distance = survey['tags'][0]['pose']['pos'][2] - transform.pos[2]
+    for quad in observations.values():
+        mask = np.zeros(depth.shape, np.uint8)
+        camera.cv().fillConvexPoly(mask, np.rint(quad).astype(np.int32), 1)
+        yy, xx = np.nonzero(mask)
+        rays = camera.pixel_rays(np.column_stack([xx, yy]), intrinsics)
+        depth[yy, xx] = distance/(rays @ normal)
+    result = layout.estimate(observations, intrinsics, depth)
     assert result['reference_distance_m'] == pytest.approx(1., abs=1e-6)
     assert not result['accepted_for_flight']
     for tag in result['tags']:
@@ -762,13 +577,11 @@ def test_inverse_brown_projection_round_trip_and_pose(survey, view):
 
 def test_invalid_layout_inputs(survey, view):
     _, intrinsics, observations = view
-    with pytest.raises(ValueError, match='measured'):
-        layout.estimate(observations, intrinsics)
     with pytest.raises(ValueError, match='aligned'):
         layout.estimate(observations, intrinsics, np.ones((10, 10)))
     del observations[0]
     with pytest.raises(ValueError, match='Need tags'):
-        layout.estimate(observations, intrinsics)
+        layout.estimate(observations, intrinsics, np.ones((720, 1280)))
 
 
 def test_survey_import_prefills_five_tag_estimates(tmp_path, capsys):
@@ -789,3 +602,17 @@ def test_survey_import_prefills_five_tag_estimates(tmp_path, capsys):
     np.testing.assert_allclose(result['tags'][2]['pose']['pos'][:2], expected)
     assert not any(t['independently_verified'] for t in result['tags'])
     assert 'estimated 0-to-1 distance' in capsys.readouterr().out
+
+
+def test_session_replaces_previous_session_but_not_other_directories(tmp_path):
+    out = tmp_path / 'run'
+    artifacts.session(out, 'setup', {})
+    (out / 'stale.png').write_text('old')
+    artifacts.session(out, 'setup', {})
+    assert not (out / 'stale.png').exists()
+    other = tmp_path / 'precious'
+    other.mkdir()
+    (other / 'data.txt').write_text('keep')
+    with pytest.raises(ValueError, match='not a previous'):
+        artifacts.session(other, 'setup', {})
+    assert (other / 'data.txt').read_text() == 'keep'

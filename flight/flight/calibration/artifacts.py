@@ -1,6 +1,7 @@
 """Versioned, finite JSON artifacts and calibration provenance."""
 import hashlib
 import json
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -30,7 +31,12 @@ def write(path, value):
 
 def session(path, kind, rig):
     path = Path(path)
-    path.mkdir(parents=True, exist_ok=False)
+    if path.exists():
+        # Replace only a previous session; never wipe an arbitrary directory.
+        if not path.is_dir() or not (path / 'report.json').is_file():
+            raise ValueError(f'{path} exists and is not a previous calibration or flight session; choose another output')
+        shutil.rmtree(path)
+    path.mkdir(parents=True)
     write(path / 'rig.json', rig)
     write(path / 'report.json', dict(version=VERSION, kind=kind, accepted=False,
                                    created_utc=datetime.now(timezone.utc).isoformat(),
@@ -46,12 +52,9 @@ def report(path, **fields):
     return value
 
 
-def accepted(path, kind, rig, allow_unverified=False):
+def accepted(path, kind, rig):
     value = read(Path(path) / 'report.json')
-    skipped_fit = (allow_unverified and kind in ('camera', 'lighthouse') and value.get('verification_skipped') is True and
-                   (value.get('fit_valid') is True if kind == 'camera'
-                    else value.get('solution', {}).get('fit_valid') is True))
-    if value.get('kind') != kind or (value.get('accepted') is not True and not skipped_fit):
+    if value.get('kind') != kind or value.get('accepted') is not True:
         raise ValueError(f'{path}: no accepted {kind} calibration')
     if value.get('rig_fingerprint') != fingerprint(rig):
         raise ValueError('Survey changed; repeat Lighthouse and camera calibration')

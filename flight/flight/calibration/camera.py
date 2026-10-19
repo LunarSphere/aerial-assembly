@@ -1,11 +1,9 @@
-"""Optional camera adapters. RGB processing never imports pyrealsense2."""
+"""RealSense D455 RGB-D camera adapter and lens-model helpers."""
 from dataclasses import dataclass, field
 import hashlib
 import time
 
 import numpy as np
-
-from .artifacts import read
 
 
 def cv():
@@ -41,69 +39,37 @@ class Frame:
     metadata: dict = field(default_factory=dict)
 
 
-class OpenCVCamera:
-    def __init__(self, device='0', width=1280, height=720, intrinsics=None):
-        c = cv()
-        self.capture = c.VideoCapture(int(device) if str(device).isdigit() else device)
-        try:
-            if not self.capture.isOpened():
-                raise RuntimeError(f'Cannot open RGB camera {device}; check OS camera permissions/device selection')
-            self.capture.set(c.CAP_PROP_FRAME_WIDTH, width)
-            self.capture.set(c.CAP_PROP_FRAME_HEIGHT, height)
-            self.profile = dict(backend='opencv', device=str(device), width=int(self.capture.get(c.CAP_PROP_FRAME_WIDTH)),
-                                height=int(self.capture.get(c.CAP_PROP_FRAME_HEIGHT)))
-            if (self.profile['width'], self.profile['height']) != (width, height):
-                raise ValueError(f'Camera did not accept requested resolution: {self.profile}')
-            self.intrinsics = None if intrinsics is None else validate_intrinsics(read(intrinsics), self.profile)
-        except BaseException:
-            self.close()
-            raise
-
-    def frame(self):
-        ok, color = self.capture.read()
-        if not ok or color is None:
-            raise RuntimeError('RGB camera stopped delivering frames')
-        if color.shape[:2] != (self.profile['height'], self.profile['width']):
-            raise ValueError('Camera resolution changed')
-        return Frame(color, time.monotonic())
-
-    def close(self):
-        self.capture.release()
-
-
 class RealSenseCamera:
-    def __init__(self, device='', width=1280, height=720, mode='rgbd', fps=30, depth_width=848):
+    def __init__(self, device='', width=1280, height=720, fps=30, depth_width=848):
         try:
             import pyrealsense2 as rs
         except ImportError as e:
-            raise RuntimeError('Install flight[vision,realsense] for the RealSense capture backend') from e
-        self.rs, self.mode = rs, mode
+            raise RuntimeError('Install flight[vision,realsense] to use the RealSense camera') from e
+        self.rs = rs
         self._restore_emitter = None
         self.pipeline = rs.pipeline()
         config = rs.config()
         if device:
             config.enable_device(device)
         config.enable_stream(rs.stream.color, width, height, rs.format.bgr8, fps)
-        if mode == 'rgbd':
-            config.enable_stream(rs.stream.depth, depth_width, 480, rs.format.z16, fps)
+        config.enable_stream(rs.stream.depth, depth_width, 480, rs.format.z16, fps)
         profile = self.pipeline.start(config)
         try:
             camera = profile.get_device()
             self.profile = dict(backend='realsense', device=camera.get_info(rs.camera_info.serial_number),
                                 width=width, height=height, fps=fps)
-            if mode == 'rgbd':
-                sensor = camera.first_depth_sensor()
-                option = rs.option.emitter_enabled
-                if not sensor.supports(option):
-                    raise RuntimeError('Cannot disable the depth IR emitter for Lighthouse use; select RGB mode instead')
-                original = sensor.get_option(option)
-                self._restore_emitter = (sensor, option, original)
-                # Repeated stationary comparisons showed that the D455 projector
-                # interferes with Lighthouse. Passive stereo depth still runs.
-                sensor.set_option(option, 0)
-                if sensor.get_option(option) != 0:
-                    raise RuntimeError('RealSense IR emitter did not switch off; cannot run alongside Lighthouse')
-                self.profile['ir_emitter_enabled'] = False
+            sensor = camera.first_depth_sensor()
+            option = rs.option.emitter_enabled
+            if not sensor.supports(option):
+                raise RuntimeError('Cannot disable the depth IR emitter for Lighthouse use')
+            original = sensor.get_option(option)
+            self._restore_emitter = (sensor, option, original)
+            # Repeated stationary comparisons showed that the D455 projector
+            # interferes with Lighthouse. Passive stereo depth still runs.
+            sensor.set_option(option, 0)
+            if sensor.get_option(option) != 0:
+                raise RuntimeError('RealSense IR emitter did not switch off; cannot run alongside Lighthouse')
+            self.profile['ir_emitter_enabled'] = False
             intr = profile.get_stream(rs.stream.color).as_video_stream_profile().get_intrinsics()
             if intr.model not in (rs.distortion.none, rs.distortion.brown_conrady,
                                    rs.distortion.modified_brown_conrady, rs.distortion.inverse_brown_conrady):
@@ -112,8 +78,8 @@ class RealSenseCamera:
                 version=1, profile=self.profile, matrix=[[intr.fx, 0, intr.ppx], [0, intr.fy, intr.ppy], [0, 0, 1]],
                 distortion=[0.] * 5 if intr.model == rs.distortion.none else list(intr.coeffs),
                 distortion_model=str(intr.model)))
-            self.align = rs.align(rs.stream.color) if mode == 'rgbd' else None
-            self.scale = camera.first_depth_sensor().get_depth_scale() if mode == 'rgbd' else None
+            self.align = rs.align(rs.stream.color)
+            self.scale = camera.first_depth_sensor().get_depth_scale()
             self._last_color_number = None
             self._last_color_digest = None
             for sensor in camera.query_sensors():
@@ -147,34 +113,31 @@ class RealSenseCamera:
                 continue
             metadata = dict(color_frame_number=number, color_timestamp_ms=color.get_timestamp(),
                             color_timestamp_domain=str(color.get_frame_timestamp_domain()), color_sha256=digest)
-            if self.align:
-                original_depth = frames.get_depth_frame()
-                if not original_depth:
-                    last_issue = 'missing depth frame'
-                    continue
-                metadata.update(depth_frame_number=original_depth.get_frame_number(),
-                                depth_timestamp_ms=original_depth.get_timestamp(),
-                                depth_timestamp_domain=str(original_depth.get_frame_timestamp_domain()))
-                if metadata['color_timestamp_domain'] != metadata['depth_timestamp_domain']:
-                    last_issue = 'color/depth timestamp domains differ'
-                    continue
-                delta = abs(metadata['color_timestamp_ms']-metadata['depth_timestamp_ms'])
-                metadata['color_depth_delta_ms'] = delta
-                if delta > 2000/self.profile['fps']:
-                    # Device clocks can settle/reset independently at startup.
-                    # A transient mismatch must not abort the warm-up itself.
-                    last_issue = f'color/depth timestamp offset {delta:.1f} ms'
-                    continue
+            original_depth = frames.get_depth_frame()
+            if not original_depth:
+                last_issue = 'missing depth frame'
+                continue
+            metadata.update(depth_frame_number=original_depth.get_frame_number(),
+                            depth_timestamp_ms=original_depth.get_timestamp(),
+                            depth_timestamp_domain=str(original_depth.get_frame_timestamp_domain()))
+            if metadata['color_timestamp_domain'] != metadata['depth_timestamp_domain']:
+                last_issue = 'color/depth timestamp domains differ'
+                continue
+            delta = abs(metadata['color_timestamp_ms']-metadata['depth_timestamp_ms'])
+            metadata['color_depth_delta_ms'] = delta
+            if delta > 2000/self.profile['fps']:
+                # Device clocks can settle/reset independently at startup.
+                # A transient mismatch must not abort the warm-up itself.
+                last_issue = f'color/depth timestamp offset {delta:.1f} ms'
+                continue
             break
         else:
             raise RuntimeError(f'RealSense did not deliver a fresh synchronized frame within 5 seconds: {last_issue}. Reconnect the camera and retry.')
-        depth = None
-        if self.align:
-            source = self.align.process(frames).get_depth_frame()
-            if not source:
-                raise RuntimeError('No RealSense depth frame')
-            depth = np.asanyarray(source.get_data()).astype(float) * self.scale
-            depth[depth <= 0] = np.nan
+        source = self.align.process(frames).get_depth_frame()
+        if not source:
+            raise RuntimeError('No RealSense depth frame')
+        depth = np.asanyarray(source.get_data()).astype(float) * self.scale
+        depth[depth <= 0] = np.nan
         self._last_color_number, self._last_color_digest = number, digest
         return Frame(image, time.monotonic(), depth, metadata)
 
@@ -188,29 +151,9 @@ class RealSenseCamera:
             self.pipeline.stop()
 
 
-def open_camera(args, need_intrinsics=True):
-    if args.camera_mode == 'rgbd' and args.camera_backend != 'realsense':
-        raise ValueError('rgbd mode requires --camera-backend realsense')
-    if args.camera_backend == 'realsense':
-        return RealSenseCamera(args.device or '', args.width, args.height, args.camera_mode,
-                               getattr(args, 'fps', 30), getattr(args, 'depth_width', 848))
-    if need_intrinsics and not args.intrinsics:
-        raise ValueError('RGB capture requires --intrinsics matching this device and resolution')
-    return OpenCVCamera(args.device or '0', args.width, args.height, args.intrinsics)
-
-
-def preview(args):
-    c = cv()
-    camera = open_camera(args, need_intrinsics=False)
-    try:
-        print(camera.profile, 'Press q to close.')
-        while True:
-            c.imshow('flight-cal camera', camera.frame().color)
-            if c.waitKey(1) & 255 == ord('q'):
-                break
-    finally:
-        camera.close()
-        c.destroyAllWindows()
+def open_camera(args):
+    return RealSenseCamera(args.device or '', args.width, args.height,
+                           getattr(args, 'fps', 30), getattr(args, 'depth_width', 848))
 
 
 def pixel_rays(pixels, intrinsics):

@@ -129,30 +129,21 @@ class NanoDetector:
                     confidence=float(best[4]), detector=self.architecture.lower()+'-onnx')
 
 
-def observe(frame, intrinsics, detector, plane=None, reference_height=None):
+def observe(frame, intrinsics, detector):
     detection = detector.detect(frame.color)
     center = np.array(detection['center_px'])
     ray = pixel_rays([center], intrinsics)[0]
-    if frame.depth_m is not None:
-        x, y = np.rint(center).astype(int)
-        patch = frame.depth_m[max(0, y-3):y+4, max(0, x-3):x+4]
-        valid = patch[np.isfinite(patch) & (patch > 0)]
-        if len(valid) < 8:
-            raise RuntimeError('Insufficient depth on the drone body; reposition until the top deck is visible')
-        # Centre patch prevents the support/nearby floor from defining the drone's depth.
-        z = float(np.median(valid))
-        if np.median(np.abs(valid-z)) > .01:
-            raise RuntimeError('Depth around drone centre is inconsistent; keep the deck unobstructed')
-        point = ray*z
-        metric_source = 'measured_depth'
-    elif plane is not None and reference_height is not None:
-        normal, distance = np.array(plane['normal_camera']), plane['distance_m']
-        # RGB cannot measure unknown drone height. Only static equal-height references
-        # use the explicitly supplied support-height profile.
-        point = ray*((distance+reference_height)/np.dot(ray, normal))
-        metric_source = 'known_reference_height'
-    else:
-        point = None
-        metric_source = 'bearing_only'
-    return dict(**detection, point_camera_m=None if point is None else point.tolist(), ray_camera=ray.tolist(),
-                metric_source=metric_source, timestamp=frame.timestamp, frame_metadata=frame.metadata)
+    if frame.depth_m is None:
+        raise RuntimeError('Drone observation needs the aligned depth stream')
+    x, y = np.rint(center).astype(int)
+    patch = frame.depth_m[max(0, y-3):y+4, max(0, x-3):x+4]
+    valid = patch[np.isfinite(patch) & (patch > 0)]
+    if len(valid) < 8:
+        raise RuntimeError('Insufficient depth on the drone body; reposition until the top deck is visible')
+    # Centre patch prevents the support/nearby floor from defining the drone's depth.
+    z = float(np.median(valid))
+    if np.median(np.abs(valid-z)) > .01:
+        raise RuntimeError('Depth around drone centre is inconsistent; keep the deck unobstructed')
+    point = ray*z
+    return dict(**detection, point_camera_m=point.tolist(), ray_camera=ray.tolist(),
+                metric_source='measured_depth', timestamp=frame.timestamp, frame_metadata=frame.metadata)

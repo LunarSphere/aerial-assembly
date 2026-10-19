@@ -8,7 +8,7 @@ import numpy as np
 
 from . import artifacts
 from .camera import cv, open_camera, pixel_rays, validate_intrinsics
-from .vision import detect, _candidate_poses
+from .vision import detect
 from ..frames import Pose, xyzw_to_wxyz
 from scipy.spatial.transform import Rotation
 
@@ -41,37 +41,26 @@ def fit_plane(points):
     return normal, distance, dict(inliers=int(best.sum()), points=len(points), rms_m=rms)
 
 
-def estimate(observations, intrinsics, depth=None, tag_size_m=None):
+def estimate(observations, intrinsics, depth):
     validate_intrinsics(intrinsics)
     if not {0, 1, 2}.issubset(observations) or len(observations) < 5:
         raise ValueError('Need tags 0 (origin), 1 (+X), 2 (XY) and at least two check tags visible')
-    if depth is not None:
-        depth = np.asarray(depth, float)
-        expected = (intrinsics['profile']['height'], intrinsics['profile']['width'])
-        if depth.shape != expected:
-            raise ValueError('Depth must be aligned to the color image resolution')
-        samples = []
-        for quad in observations.values():
-            center = np.mean(quad, axis=0)
-            polygon = np.rint(center + .8 * (np.asarray(quad)-center)).astype(np.int32)
-            mask = np.zeros(depth.shape, np.uint8)
-            cv().fillConvexPoly(mask, polygon, 1)
-            yy, xx = np.nonzero(mask)
-            z = depth[yy, xx]
-            valid = np.isfinite(z) & (z > 0)
-            samples.extend((pixel_rays(np.column_stack([xx[valid], yy[valid]]), intrinsics) * z[valid, None]).tolist())
-        normal, distance, plane_stats = fit_plane(samples)
-        source = 'rgbd_estimate'
-    else:
-        if tag_size_m is None or not np.isfinite(tag_size_m) or tag_size_m <= 0:
-            raise ValueError('RGB estimation requires one measured --tag-size-mm (same size for all tags)')
-        s = tag_size_m / 2
-        local = np.array([[-s, s, 0], [s, s, 0], [s, -s, 0], [-s, -s, 0]])
-        _, camera_in_tag, _, _ = _candidate_poses(local, observations[0], intrinsics)
-        tag_in_camera = camera_in_tag.inverse()
-        normal = tag_in_camera.rotate([0, 0, 1])
-        distance = float(np.dot(normal, tag_in_camera.pos))
-        plane_stats, source = {}, 'rgb_estimate'
+    depth = np.asarray(depth, float)
+    expected = (intrinsics['profile']['height'], intrinsics['profile']['width'])
+    if depth.shape != expected:
+        raise ValueError('Depth must be aligned to the color image resolution')
+    samples = []
+    for quad in observations.values():
+        center = np.mean(quad, axis=0)
+        polygon = np.rint(center + .8 * (np.asarray(quad)-center)).astype(np.int32)
+        mask = np.zeros(depth.shape, np.uint8)
+        cv().fillConvexPoly(mask, polygon, 1)
+        yy, xx = np.nonzero(mask)
+        z = depth[yy, xx]
+        valid = np.isfinite(z) & (z > 0)
+        samples.extend((pixel_rays(np.column_stack([xx[valid], yy[valid]]), intrinsics) * z[valid, None]).tolist())
+    normal, distance, plane_stats = fit_plane(samples)
+    source = 'rgbd_estimate'
     vertices = {}
     for tag_id, quad in observations.items():
         rays = pixel_rays(quad, intrinsics)
@@ -107,7 +96,7 @@ def estimate(observations, intrinsics, depth=None, tag_size_m=None):
         heading = points[1]-points[0]
         yaw = math.atan2(heading[1], heading[0])
         tags.append(dict(id=tag_id, role={0: 'origin', 1: 'x', 2: 'xy'}.get(tag_id, 'check'),
-                         size_m=float(np.mean(sizes)) if tag_size_m is None else float(tag_size_m),
+                         size_m=float(np.mean(sizes)),
                          pose=dict(pos=pos.tolist(), quat=[math.cos(yaw/2), 0., 0., math.sin(yaw/2)]),
                          survey_source=source, independently_verified=False))
     return dict(version=1, kind='tag-layout', family='25h9', coordinate_frame='tag_plane',
@@ -152,14 +141,11 @@ def capture(args):
             raise ValueError('Could not collect 20 frames containing the three references and two check tags')
         ids = set.intersection(*(set(v) for v in observations))
         quads = {i: np.median([v[i] for v in observations], axis=0) for i in ids}
-        depth = None
-        if args.camera_mode == 'rgbd':
-            with warnings.catch_warnings():
-                warnings.simplefilter('ignore', RuntimeWarning)
-                depth = np.nanmedian(np.array([f.depth_m for f in frames]), axis=0)
-            np.save(output / 'depth-m.npy', depth)
-        size = None if args.tag_size_mm is None else args.tag_size_mm/1000
-        result = estimate(quads, camera.intrinsics, depth, size)
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', RuntimeWarning)
+            depth = np.nanmedian(np.array([f.depth_m for f in frames]), axis=0)
+        np.save(output / 'depth-m.npy', depth)
+        result = estimate(quads, camera.intrinsics, depth)
         artifacts.write(output / 'layout.json', result)
         artifacts.write(output / 'intrinsics.json', camera.intrinsics)
         artifacts.write(output / 'observations.json', dict(version=1, corners={str(k): v.tolist() for k, v in quads.items()}))

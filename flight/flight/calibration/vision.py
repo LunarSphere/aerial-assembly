@@ -158,13 +158,12 @@ def calibrate(args, rig):
                 for f, obs in zip(frames, observations)]))
             artifacts.write(output / 'intrinsics.json', camera.intrinsics)
             result = solve(rig, averaged, camera.intrinsics)
-            if args.camera_mode == 'rgbd':
-                result['depth_diagnostics'] = depth_report(frames[-1], observations[-1], rig, camera.intrinsics,
-                                                            result['T_lighthouse_camera'])
-                if not all(d['valid'] for d in result['depth_diagnostics']):
-                    result['accepted'] = False
-                    result['reason'] = 'Invalid depth on one or more surveyed tag surfaces'
-            result.update(profile=camera.profile, camera_mode=args.camera_mode,
+            result['depth_diagnostics'] = depth_report(frames[-1], observations[-1], rig, camera.intrinsics,
+                                                        result['T_lighthouse_camera'])
+            if not all(d['valid'] for d in result['depth_diagnostics']):
+                result['accepted'] = False
+                result['reason'] = 'Invalid depth on one or more surveyed tag surfaces'
+            result.update(profile=camera.profile,
                           intrinsics_fingerprint=artifacts.fingerprint(camera.intrinsics),
                           lighthouse_fingerprint=lh['geometry_fingerprint'])
             artifacts.report(output, **result)

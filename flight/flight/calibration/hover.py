@@ -182,8 +182,8 @@ def camera_worker(args, rig, calibration, queue, stop, out):
     try:
         camera = open_camera(args)
         try:
-            if camera.profile != calibration['profile'] or args.camera_mode != calibration['camera_mode']:
-                raise ValueError('Camera profile/mode differs from accepted calibration')
+            if camera.profile != calibration['profile']:
+                raise ValueError('Camera profile differs from accepted calibration')
             saved_intrinsics = artifacts.read(Path(args.calibration)/'intrinsics.json')
             if artifacts.fingerprint(saved_intrinsics) != calibration['intrinsics_fingerprint']:
                 raise ValueError('Saved intrinsics file changed after calibration')
@@ -267,9 +267,9 @@ def camera_worker(args, rig, calibration, queue, stop, out):
                         observation = None
                     if observation is not None:
                         status['drone'] = observation
-                    # RGB supplies a bearing; depth supplies an estimated 3D position.
+                    # Depth supplies an estimated 3D position.
                     # This is a visual body centre, not a measured Lighthouse sensor centre.
-                    if observation is not None and observation['point_camera_m'] is not None:
+                    if observation is not None:
                         position = inv.inverse().apply(observation['point_camera_m'])
                         status['drone_world_m'] = position.tolist()
                         status['tag_offsets_m'] = {str(t['id']): (position-np.array(t['pose']['pos'])).tolist()
@@ -352,14 +352,6 @@ class CameraMonitor:
                 self.emit(dict(event='visual_tracking_error', error_m=error, metric='body_centre_3d'))
                 if error > .05 and not self.demo:
                     raise RuntimeError('Visual drone position differs from Lighthouse by more than 5 cm')
-            else:
-                transform = (self.latest.get('registration') or self.calibration)['T_lighthouse_camera']
-                expected = Pose.from_dict(transform).inverse().apply(expected_position)
-                ray = np.array(self.latest['drone']['ray_camera'])
-                error = float(np.linalg.norm(np.cross(expected, ray))/np.linalg.norm(ray))
-                self.emit(dict(event='visual_tracking_error', error_m=error, metric='bearing_lateral'))
-                if (expected[2] <= 0 or error > .05) and not self.demo:
-                    raise RuntimeError('Visual drone bearing differs from Lighthouse by more than 5 cm laterally')
 
     def __exit__(self, *exc):
         self.stop.set()
@@ -422,15 +414,14 @@ def execute(cf, plan, rig, health, camera, clock, emit):
 
 
 def run(args, rig, ask=input):
-    allow_unverified = getattr(args, 'allow_unverified', False)
-    calibration = artifacts.accepted(args.calibration, 'camera', rig, allow_unverified=allow_unverified)
-    lh = artifacts.accepted(args.lighthouse, 'lighthouse', rig, allow_unverified=allow_unverified)
-    unverified = not (calibration.get('accepted') is True and lh.get('accepted') is True)
+    calibration = artifacts.accepted(args.calibration, 'camera', rig)
+    lh = artifacts.accepted(args.lighthouse, 'lighthouse', rig)
+    upload_needed = lh.get('upload_verified') is not True  # setup defers the geometry upload to the flight
     if calibration['lighthouse_fingerprint'] != lh['geometry_fingerprint']:
         raise ValueError('Camera calibration belongs to a different Lighthouse geometry')
     solution = artifacts.read(Path(args.lighthouse) / 'solution.json')
-    if unverified and not (solution.get('fit_valid') is True and solution.get('verification_skipped') is True):
-        raise ValueError('Unverified override requires a successfully fitted, explicitly skipped Lighthouse solution')
+    if upload_needed and solution.get('fit_valid') is not True:
+        raise ValueError('Geometry upload requires a successfully fitted Lighthouse solution')
     if artifacts.fingerprint(solution['geometry']) != lh['geometry_fingerprint']:
         raise ValueError('Saved Lighthouse geometry has changed')
     demo = getattr(args, 'demo', False)
@@ -439,7 +430,7 @@ def run(args, rig, ask=input):
     controller = getattr(args, 'controller', None) or ('pid' if demo else 'mellinger')
     live = args.arm or args.check_only or camera_only
     output = artifacts.session(args.out, command, rig)
-    artifacts.report(output, unverified_calibration=unverified, allow_unverified=allow_unverified, demo=demo,
+    artifacts.report(output, demo=demo,
                      visual_position_advisory=demo,
                      controller=controller,
                      flight_battery_policy=battery_policy(demo),
@@ -499,13 +490,13 @@ def run(args, rig, ask=input):
             from ..preflight import wait_for_parameters
             wait_for_parameters(scf, clock)
             factory = artifacts.read(Path(args.lighthouse) / 'factory-calibration.json')['stations']
-            if unverified:
+            if upload_needed:
                 if scf.cf.platform.get_protocol_version() >= 12 and scf.cf.supervisor.is_armed:
                     raise RuntimeError('Geometry upload requires the drone to be disarmed')
                 from .lighthouse import upload
-                emit(dict(event='upload_unverified_geometry', geometry_fingerprint=lh['geometry_fingerprint']))
+                emit(dict(event='upload_geometry', geometry_fingerprint=lh['geometry_fingerprint']))
                 upload_report = upload(scf.cf, solution, factory)
-                artifacts.report(output, unverified_geometry_uploaded=True, geometry_readback_verified=True,
+                artifacts.report(output, geometry_uploaded=True, geometry_readback_verified=True,
                                  lighthouse_upload=upload_report)
             else:
                 check_live_geometry(scf.cf, solution['geometry'], factory)

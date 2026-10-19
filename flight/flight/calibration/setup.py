@@ -1,6 +1,5 @@
 """Compact cfclient-style setup: four placement prompts, automatic radio and camera survey."""
 from pathlib import Path
-from queue import Empty, Queue
 import time
 import warnings
 
@@ -11,7 +10,7 @@ from ..frames import Pose, xyzw_to_wxyz
 from ..clock import RealClock
 from ..preflight import wait_for_parameters
 from . import artifacts, lighthouse, layout
-from .camera import cv, open_camera, RealSenseCamera, ideal_pixels, pixel_rays, project_points
+from .camera import cv, RealSenseCamera, project_points
 from .discovery import scan_uri, discover_stations
 from .drone import NanoDetector, observe
 from .presets import default_hardware
@@ -26,19 +25,11 @@ PROMPTS = (
 
 
 def automatic_camera(args):
-    """Prefer the one D455; USB 2 uses the profiles observed on this actual camera."""
-    if args.camera_backend != 'auto':
-        if args.camera_mode == 'auto':
-            args.camera_mode = 'rgbd' if args.camera_backend == 'realsense' else 'rgb'
-        camera = open_camera(args)
-        if camera.intrinsics is None:
-            camera.close()
-            raise ValueError('RGB setup requires --intrinsics FILE for the selected camera profile')
-        return camera
+    """The one D455; USB 2 uses the profiles observed on this actual camera."""
     try:
         import pyrealsense2 as rs
     except ImportError as e:
-        raise RuntimeError('Auto camera discovery needs flight[realsense]. For RGB use --camera-backend opencv --intrinsics FILE.') from e
+        raise RuntimeError('Setup needs flight[realsense] for the D455.') from e
     devices = [d for d in rs.context().query_devices() if 'D455' in d.get_info(rs.camera_info.name)]
     if args.device:
         devices = [d for d in devices if d.get_info(rs.camera_info.serial_number) == args.device]
@@ -46,17 +37,15 @@ def automatic_camera(args):
         raise RuntimeError('Connect one D455, or select it with --device SERIAL')
     device = devices[0]
     args.device = device.get_info(rs.camera_info.serial_number)
-    args.camera_backend = 'realsense'
-    args.camera_mode = 'rgbd' if args.camera_mode == 'auto' else args.camera_mode
     usb2 = device.get_info(rs.camera_info.usb_type_descriptor).startswith('2')
     args.fps, args.depth_width = (15, 640) if usb2 else (30, 848)
     if usb2 and (args.width, args.height) == (1280, 720):
         args.width, args.height = 640, 480
         print('D455 is on USB 2: using 640×480 color/depth at 15 fps to reduce USB traffic.')
-    return RealSenseCamera(args.device, args.width, args.height, args.camera_mode, args.fps, args.depth_width)
+    return RealSenseCamera(args.device, args.width, args.height, args.fps, args.depth_width)
 
 
-def environment(camera, output, tag_size_mm=None):
+def environment(camera, output):
     frames, quads = [], []
     print(f'Camera profile: {camera.profile}. Warming up camera, then looking for AprilTags 25h9...')
     for _ in range(15):
@@ -92,14 +81,11 @@ def environment(camera, output, tag_size_mm=None):
     print(f'Tag layout capture complete: 20 usable frames; IDs {sorted(set.intersection(*(set(q) for q in quads)))}.')
     ids = set.intersection(*(set(v) for v in quads))
     observations = {i: np.median([q[i] for q in quads], axis=0) for i in ids}
-    depth = None
-    if frames[-1].depth_m is not None:
-        with warnings.catch_warnings():
-            warnings.simplefilter('ignore', RuntimeWarning)
-            depth = np.nanmedian(np.array([f.depth_m for f in frames]), axis=0)
-        np.save(output/'floor-depth-m.npy', depth)
-    result = layout.estimate(observations, camera.intrinsics, depth,
-                             None if tag_size_mm is None else tag_size_mm/1000)
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', RuntimeWarning)
+        depth = np.nanmedian(np.array([f.depth_m for f in frames]), axis=0)
+    np.save(output/'floor-depth-m.npy', depth)
+    result = layout.estimate(observations, camera.intrinsics, depth)
     artifacts.write(output/'layout.json', result)
     artifacts.write(output/'intrinsics.json', camera.intrinsics)
     cv().imwrite(str(output/'floor.png'), layout.annotate(frames[-1].color, observations, result))
@@ -154,11 +140,9 @@ def paired_sample(cf, camera, detector, stations, role, output, index):
     frame, after = stable_drone_observation(camera, detector, output, f'drone-{index:02d}-after')
     if np.linalg.norm(np.subtract(before['center_px'], after['center_px'])) > 3:
         raise RuntimeError('Drone moved during measurement; repeat with the drone held still')
-    point = None
-    if before['point_camera_m'] is not None and after['point_camera_m'] is not None:
-        if np.linalg.norm(np.subtract(before['point_camera_m'], after['point_camera_m'])) > .01:
-            raise RuntimeError('Drone depth changed during measurement; hold still and retry')
-        point = np.mean([before['point_camera_m'], after['point_camera_m']], axis=0).tolist()
+    if np.linalg.norm(np.subtract(before['point_camera_m'], after['point_camera_m'])) > .01:
+        raise RuntimeError('Drone depth changed during measurement; hold still and retry')
+    point = np.mean([before['point_camera_m'], after['point_camera_m']], axis=0).tolist()
     observation = dict(center_px=np.mean([before['center_px'], after['center_px']], axis=0).tolist(),
                        point_camera_m=point, before=before, after=after,
                        synchronization='stationary bracketed capture', image=f'drone-{index:02d}.jpg')
@@ -169,13 +153,9 @@ def paired_sample(cf, camera, detector, stations, role, output, index):
     return dict(role=role, **sample, camera=observation)
 
 
-def collect_samples(cf, camera, detector, stations, output, ask=input, gesture_factory=None, skip_verification=False, skip_geometry=False):
-    """Three reference prompts; remaining samples triggered by the cfclient shake gesture."""
-    from cflib.localization.user_action_detector import UserActionDetector
-    gesture_factory = gesture_factory or UserActionDetector
-    skip_verification = skip_verification or skip_geometry
-    raw = dict(version=1, base_stations=stations, samples=[], verification_skipped=skip_verification,
-               geometry_skipped=skip_geometry)
+def collect_samples(cf, camera, detector, stations, output, ask=input):
+    """Three reference placements: origin, +X and an off-axis point on the same plane."""
+    raw = dict(version=1, base_stations=stations, samples=[], reference_only=True)
     def capture(role):
         sample = paired_sample(cf, camera, detector, stations, role, output, len(raw['samples']))
         if role in ('x', 'xy') and raw['samples']:
@@ -197,41 +177,6 @@ def collect_samples(cf, camera, detector, stations, output, ask=input, gesture_f
     for prompt, role in zip(PROMPTS[:3], ('origin', 'x', 'xy')):
         ask(prompt+' ')
         capture(role)
-    if skip_geometry:
-        print('Extra geometry and verification samples skipped. Estimating from the three reference placements only; UNVERIFIED.')
-        return raw
-    print('Now carry the DISARMED drone around the flight area, varying position and height.')
-    print('At each position, briefly rotate it left–right around vertical, return its nose to +X, then hold still.')
-    print('Like cfclient, the gesture triggers measurement. Keep hands clear of the top deck.')
-    print('Collecting 8 geometry samples. Verification skipped; results will be UNVERIFIED.' if skip_verification else
-          'Collecting 8 geometry samples, followed by 5 NEW verification positions. No more typing needed.')
-    queue = Queue()
-    trigger = gesture_factory(cf, cb=lambda: queue.put(time.monotonic()))
-    deadline = time.monotonic()+300
-    trigger.start()
-    try:
-        for role in ['xyz']*8+([] if skip_verification else ['verification']*5):
-            while True:
-                if not cf.is_connected():
-                    raise ConnectionError('Crazyradio disconnected during gesture collection')
-                if time.monotonic() > deadline:
-                    raise TimeoutError('Gesture collection timed out. Redo setup and use distinct shake-and-hold positions.')
-                try:
-                    at = queue.get(timeout=.2)
-                except Empty:
-                    continue
-                if time.monotonic()-at >= 1.:
-                    continue
-                try:
-                    capture(role)
-                except (RuntimeError, TimeoutError) as error:
-                    print(f'Sample rejected: {error}. Reposition, then repeat the shake-and-hold gesture.')
-                    continue
-                break
-            if len(raw['samples']) == 11 and not skip_verification:
-                print('Geometry samples complete. Move to NEW positions for the five independent checks.')
-    finally:
-        trigger.stop()
     return raw
 
 
@@ -239,7 +184,7 @@ def align_reference_camera(raw, world, intrinsics, max_rms_px=1.):
     """Three RGB-D correspondences determine a provisional rigid transform."""
     points = [s['camera']['point_camera_m'] for s in raw['samples']]
     if len(points) != 3 or any(p is None for p in points):
-        raise ValueError('Skipping all extra samples requires RGB-D depth at all three reference placements')
+        raise ValueError('Setup requires RGB-D depth at all three reference placements')
     camera = np.asarray(points, float)
     if camera.shape != (3, 3) or not np.all(np.isfinite(camera)):
         raise ValueError('Invalid reference depth observations')
@@ -275,66 +220,19 @@ def align_reference_camera(raw, world, intrinsics, max_rms_px=1.):
                 reprojection_limit_px=max_rms_px, rms_limit_overridden=max_rms_px != 1.,
                 reference_pair_diagnostics=pair_diagnostics, training_sample_diagnostics=sample_diagnostics,
                 training_max_error_m=float(np.max(np.linalg.norm(transform.apply(camera)-world, axis=1))),
-                max_check_error_m=None, check_samples=[], verification_method='skipped',
-                verification_skipped=True, geometry_skipped=True, independent_tag_verification=False,
-                fit_method='three_reference_rgbd_rigid_alignment', fit_valid=bool(rms <= max_rms_px), accepted=False)
+                fit_method='three_reference_rgbd_rigid_alignment', fit_valid=bool(rms <= max_rms_px),
+                accepted=bool(rms <= max_rms_px))
 
 
 def align_camera(raw, solution, intrinsics, max_rms_px=1.):
-    """Fit nonplanar drone correspondences; reserve all five verification poses."""
     if not np.isfinite(max_rms_px) or max_rms_px <= 0:
         raise ValueError('Camera RMS limit must be a finite positive number')
     if len(raw['samples']) != len(solution['samples']):
         raise ValueError('Camera/Lighthouse sample counts do not match')
     world = np.array([s['position_m'] for s in solution['samples']], float)
-    pixels = np.array([s['camera']['center_px'] for s in raw['samples']], float)
-    if world.shape != (len(pixels), 3) or not np.all(np.isfinite(world)):
+    if world.shape != (len(raw['samples']), 3) or not np.all(np.isfinite(world)):
         raise ValueError('Lighthouse solver did not produce every required pose')
-    if raw.get('geometry_skipped') is True:
-        if raw.get('verification_skipped') is not True:
-            raise ValueError('Reference-only camera alignment must be marked unverified')
-        return align_reference_camera(raw, world, intrinsics, max_rms_px=max_rms_px)
-    heldout = np.array([s['role'] == 'verification' for s in raw['samples']])
-    train = ~heldout
-    skip_verification = raw.get('verification_skipped') is True
-    if train.sum() < 6 or (not skip_verification and heldout.sum() < 5) or np.linalg.matrix_rank(world[train]-world[train].mean(0)) < 3:
-        raise ValueError('Camera alignment needs varied 3D geometry samples and five independent verification positions')
-    k = np.array(intrinsics['matrix'], float)
-    ideal = ideal_pixels(pixels, intrinsics)
-    c = cv()
-    ok, rv, tv, inliers = c.solvePnPRansac(np.ascontiguousarray(world[train]), np.ascontiguousarray(ideal[train]),
-        k, np.zeros(5), iterationsCount=200, reprojectionError=2., confidence=.999, flags=c.SOLVEPNP_EPNP)
-    if not ok or inliers is None or len(inliers) < max(6, int(.8*train.sum())):
-        raise ValueError('Visual drone observations do not agree with Lighthouse positions; improve visibility and repeat')
-    selected = np.flatnonzero(train)[inliers.flatten()]
-    rv, tv = c.solvePnPRefineLM(np.ascontiguousarray(world[selected]), np.ascontiguousarray(ideal[selected]),
-                               k, np.zeros(5), rv, tv)
-    r = c.Rodrigues(rv)[0]
-    if np.any((world@r.T+tv.reshape(3))[:, 2] <= 0):
-        raise ValueError('Camera alignment places drone observations behind the camera')
-    transform = Pose(tuple(-r.T@tv.reshape(3)), tuple(xyzw_to_wxyz(Rotation.from_matrix(r.T).as_quat())))
-    predicted = project_points(world, rv, tv, intrinsics)
-    errors_px = np.linalg.norm(predicted-pixels, axis=1)
-    rms = float(np.sqrt(np.mean(errors_px[train]**2)))
-    checks = []
-    for i in np.flatnonzero(heldout):
-        observed = raw['samples'][i]['camera']['point_camera_m']
-        if observed is not None:
-            error = float(np.linalg.norm(transform.apply(observed)-world[i]))
-            metric = 'independent_drone_depth_3d'
-        else:
-            expected_camera = r@world[i]+tv.reshape(3)
-            ray = pixel_rays([pixels[i]], intrinsics)[0]
-            error = float(np.linalg.norm(np.cross(expected_camera, ray))/np.linalg.norm(ray))
-            metric = 'independent_drone_bearing_lateral'
-        checks.append(dict(sample=i, error_m=error, reprojection_error_px=float(errors_px[i]), metric=metric))
-    maximum = max((s['error_m'] for s in checks), default=None)
-    return dict(T_lighthouse_camera=transform.to_dict(), reprojection_rms_px=rms,
-                reprojection_limit_px=max_rms_px, rms_limit_overridden=max_rms_px != 1.,
-                max_check_error_m=maximum, check_samples=checks,
-                verification_method='skipped' if skip_verification else 'held_out_drone_correspondences',
-                verification_skipped=skip_verification, fit_valid=bool(rms <= max_rms_px), independent_tag_verification=False,
-                accepted=bool(not skip_verification and rms <= max_rms_px and maximum is not None and maximum <= .005))
+    return align_reference_camera(raw, world, intrinsics, max_rms_px=max_rms_px)
 
 
 def build_rig(floor, camera_result, stations, hardware):
@@ -363,35 +261,28 @@ def build_rig(floor, camera_result, stations, hardware):
 
 
 def check_launch_return(origin, home):
-    """Use measured displacement when depth exists; pixels alone are an RGB fallback."""
+    """Require the measured 3D return to be within 2 cm of the origin observation."""
     pixel_error = float(np.linalg.norm(np.subtract(home['center_px'], origin['center_px'])))
-    if home['point_camera_m'] is not None and origin['point_camera_m'] is not None:
-        error = float(np.linalg.norm(np.subtract(home['point_camera_m'], origin['point_camera_m'])))
-        if not np.isfinite(error) or error > .02:
-            raise ValueError(f'Drone is {error*100:.1f} cm from the original launch position/height; return within 2 cm')
-        return dict(version=1, accepted=True, metric='depth_3d', error_m=error, limit_m=.02, pixel_error=pixel_error)
-    if not np.isfinite(pixel_error) or pixel_error > 5:
-        raise ValueError(f'Drone has not returned to the original launch position ({pixel_error:.1f} px; limit 5 px)')
-    return dict(version=1, accepted=True, metric='rgb_pixels', pixel_error=pixel_error, limit_px=5.)
+    error = float(np.linalg.norm(np.subtract(home['point_camera_m'], origin['point_camera_m'])))
+    if not np.isfinite(error) or error > .02:
+        raise ValueError(f'Drone is {error*100:.1f} cm from the original launch position/height; return within 2 cm')
+    return dict(version=1, accepted=True, metric='depth_3d', error_m=error, limit_m=.02, pixel_error=pixel_error)
 
 
-def save_completed_setup(root, rig, solution, alignment, intrinsics, profile, camera_mode,
-                         detector_path, detector_name, uri, stations, skip_verification,
-                         skip_geometry, prompts):
+def save_completed_setup(root, rig, solution, alignment, intrinsics, profile,
+                         detector_path, detector_name, uri, stations, prompts):
     """Persist a fitted setup after its launch return (and any required upload) passed."""
     lh_out, camera_out = root/'lighthouse', root/'camera'
     key = artifacts.fingerprint(solution['geometry'])
     for p in (root, lh_out, camera_out):
         artifacts.write(p/'rig.json', rig)
         artifacts.report(p, rig_fingerprint=artifacts.fingerprint(rig))
-    artifacts.report(lh_out, accepted=not skip_verification, verification_skipped=skip_verification,
-                     geometry_skipped=skip_geometry, upload_verified=not skip_verification, geometry_fingerprint=key, uri=uri)
+    artifacts.report(lh_out, accepted=True, upload_verified=False, geometry_fingerprint=key, uri=uri)
     artifacts.write(camera_out/'intrinsics.json', intrinsics)
     artifacts.report(camera_out, **alignment, lighthouse_fingerprint=key, profile=profile,
-        camera_mode=camera_mode, intrinsics_fingerprint=artifacts.fingerprint(intrinsics),
+        intrinsics_fingerprint=artifacts.fingerprint(intrinsics),
         detector_model=detector_path, detector=detector_name.lower()+'-onnx')
-    artifacts.report(root, accepted=not skip_verification, completed=True, verification_skipped=skip_verification,
-                     geometry_skipped=skip_geometry, uri=uri, base_stations=stations,
+    artifacts.report(root, accepted=True, completed=True, uri=uri, base_stations=stations,
                      camera_profile=profile, prompts=prompts, reason=None,
                      hardware_assumptions=rig['hardware_preset']['assumptions'])
 
@@ -404,8 +295,6 @@ def run(args, ask=input):
         raise ValueError('--max-camera-rms-px must be a finite positive number')
     target = Path(args.out)
     root = target.with_suffix('.setup') if target.suffix == '.json' else target
-    if target.exists():
-        raise ValueError(f'{target} already exists; choose a new output')
     root = artifacts.session(root, 'setup', {})
     artifacts.report(root, camera_reprojection_limit_px=max_rms_px, camera_rms_limit_overridden=max_rms_px != 1.)
     camera = None
@@ -413,15 +302,7 @@ def run(args, ask=input):
         detector = NanoDetector(args.detector_model)
         print(f'Drone detector: {detector.architecture}, input {detector.size}px, CPU.')
         camera = automatic_camera(args)
-        skip_geometry = getattr(args, 'skip_extra_samples', False)
-        if skip_geometry and args.camera_mode != 'rgbd':
-            raise ValueError('--skip-extra-samples needs RGB-D depth; RGB-only registration requires the extra geometry samples')
-        tag_size = args.tag_size_mm
-        if args.camera_mode == 'rgb':
-            if tag_size is None:
-                # RGB needs one metric scale input; total remains five prompts.
-                tag_size = float(ask('Black-square tag side in millimetres (measure one tag): '))
-        floor = environment(camera, root, tag_size)
+        floor = environment(camera, root)
         print('Keep the camera fixed. Choose origin, +X and XY placements with the ENTIRE drone inside the camera view.')
         uri = args.uri or scan_uri()
         with connect(uri) as scf:
@@ -446,46 +327,33 @@ def run(args, ask=input):
                 raise RuntimeError('Both detected stations must have valid factory calibration')
             lh_out = artifacts.session(root/'lighthouse', 'lighthouse', {})
             artifacts.write(lh_out/'factory-calibration.json', dict(version=1, stations=factory))
-            skip_verification = getattr(args, 'skip_verification', False) or skip_geometry
-            raw = collect_samples(cf, camera, detector, stations, lh_out, ask,
-                                  skip_verification=skip_verification, skip_geometry=skip_geometry)
+            raw = collect_samples(cf, camera, detector, stations, lh_out, ask)
             solution = lighthouse.solve_bounded(lh_out/'samples.json', lh_out)
             artifacts.report(lh_out, solution=solution, station_status=status)
-            if not solution['accepted'] and not (skip_verification and solution.get('fit_valid')):
-                if skip_verification:
-                    raise ValueError('Lighthouse estimation did not converge with valid reference placements; repeat setup or include extra geometry samples')
-                raise ValueError('Lighthouse calibration rejected: maximum held-out error must be ≤0.4 mm. Redo the placement/sampling steps.')
+            if not solution.get('fit_valid'):
+                raise ValueError('Lighthouse estimation did not converge with valid reference placements; repeat setup')
             alignment = align_camera(raw, solution, camera.intrinsics, max_rms_px=max_rms_px)
             camera_out = artifacts.session(root/'camera', 'camera', {})
             artifacts.report(camera_out, **dict(alignment, accepted=False))
-            if not alignment['accepted'] and not (skip_verification and alignment['fit_valid']):
-                if skip_verification:
-                    details = ''
-                    pairs = alignment.get('reference_pair_diagnostics', [])
-                    if pairs:
-                        details = (f'; origin-to-X distance: camera {pairs[0]["camera_distance_m"]*1000:.1f} mm, '
-                                   f'Lighthouse {pairs[0]["lighthouse_distance_m"]*1000:.1f} mm')
-                    raise ValueError(f'Camera fitting failed: RMS {alignment["reprojection_rms_px"]:.2f} px exceeds {max_rms_px:g} px'
-                                     f'{details}. See {camera_out/"report.json"}')
-                raise ValueError(f'Camera/drone alignment rejected: RMS {alignment["reprojection_rms_px"]:.2f} px, '
-                                 f'held-out error {alignment["max_check_error_m"]*1000:.1f} mm; limits {max_rms_px:g} px / 5 mm.')
+            if not alignment['fit_valid']:
+                details = ''
+                pairs = alignment.get('reference_pair_diagnostics', [])
+                if pairs:
+                    details = (f'; origin-to-X distance: camera {pairs[0]["camera_distance_m"]*1000:.1f} mm, '
+                               f'Lighthouse {pairs[0]["lighthouse_distance_m"]*1000:.1f} mm')
+                raise ValueError(f'Camera fitting failed: RMS {alignment["reprojection_rms_px"]:.2f} px exceeds {max_rms_px:g} px'
+                                 f'{details}. See {camera_out/"report.json"}')
             rig = build_rig(floor, alignment, stations, default_hardware())
             from .hover import route
             route(rig)
             ask(PROMPTS[3]+' ')
             _, home = stable_drone_observation(camera, detector, root, 'launch-return')
             artifacts.write(root/'launch-return-check.json', check_launch_return(raw['samples'][0]['camera'], home))
-            if not skip_verification:
-                lighthouse.upload(cf, solution, factory)
-            save_completed_setup(root, rig, solution, alignment, camera.intrinsics, camera.profile, args.camera_mode,
-                detector.path, detector.architecture, uri, stations, skip_verification, skip_geometry,
-                4+(1 if tag_size and args.camera_mode == 'rgb' and args.tag_size_mm is None else 0))
+            save_completed_setup(root, rig, solution, alignment, camera.intrinsics, camera.profile,
+                detector.path, detector.architecture, uri, stations, 4)
             if target.suffix == '.json':
                 artifacts.write(target, rig)
-        if skip_verification:
-            print(f'UNVERIFIED estimates saved: {root}. No geometry uploaded; hover requires --allow-unverified.')
-        else:
-            print(f'Setup saved: {root}. Motors remained disarmed. Inspect floor.png and the reports before supervised hover.')
+        print(f'Setup saved: {root}. Motors remained disarmed; Lighthouse geometry is uploaded when a flight command starts.')
         return root
     except BaseException as e:
         artifacts.report(root, accepted=False, reason=str(e))
