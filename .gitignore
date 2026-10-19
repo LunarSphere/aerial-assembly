@@ -2,7 +2,20 @@
 __pycache__/
 *.egg-info/
 .pytest_cache/
+# Local experiment captures, reports, and downloaded/exported models.
 runs/
+.cache/
+*.onnx
+*.pt
+*.pth
+*.safetensors
+*.mp4
+*.avi
+*.mkv
+*.webm
+*.bag
 assets/
 .env
 
+third_party/
+.venv-crazyflow/

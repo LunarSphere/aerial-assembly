@@ -82,6 +82,16 @@ def tooth_width(p: BrickParams, t):
     return p.tooth_w - p.tooth_taper*np.clip(t, 0., None)/p.tooth_L
 
 
+def _tip_chamfer(p: BrickParams):
+    return min(p.tip_chamfer, 0.45*tooth_width(p, p.tooth_L), 0.45*p.tooth_L)
+
+
+def _barb_span(p: BrickParams):
+    """(t_catch, length) of the barb along the tooth axis; it ends where the tip chamfer starts."""
+    bl = max(0.3, min(p.barb_len, p.tooth_L - _tip_chamfer(p) - 0.5))
+    return p.tooth_L - _tip_chamfer(p) - bl, bl
+
+
 def slot(p: BrickParams, valley, mirrored, reversed=False):
     """Tapered slot below a valley (profile coordinates of the valley point).
 
@@ -103,7 +113,71 @@ def slot(p: BrickParams, valley, mirrored, reversed=False):
     m = v + mouth_w*n + t*d
     ch = p.mouth_chamfer
     mouth = Polygon([m, m + ch*r, m + ch*d])
-    return unary_union([cut, mouth])
+    pieces = [cut, mouth]
+    if p.barb_h > 0:
+        # Pocket in the near wall where the seated barb rests (clear of contact when seated).
+        t0, bl = _barb_span(p)
+        c = max(p.clearance, 0.1)
+        pieces.append(_quad(v, d, n, (t0 - 0.2 - c, t0 + bl + c), (0., tooth_width(p, t0) + gap + p.barb_h + c)))
+    return unary_union(pieces)
+
+
+def barb(p: BrickParams, keel, mirrored, reversed=False):
+    """Snap barb on the tooth's near flank: ramp toward the tip, flat catch face toward the root."""
+    _, d, n, _ = interface(p, mirrored, reversed)
+    t0, bl = _barb_span(p)
+    o = np.asarray(keel, dtype=float)
+    at = lambda t, s: o + t*d + s*n
+    return Polygon([at(t0, tooth_width(p, t0) - 0.3), at(t0, tooth_width(p, t0) + p.barb_h),
+                    at(t0 + bl, tooth_width(p, t0 + bl)), at(t0 + bl, tooth_width(p, t0 + bl) - 0.3)])
+
+
+def lip(p: BrickParams, apex, mirrored, reversed=False):
+    """Capture lip: a centred tapered tooth hanging from the bottom apex at the brick's middle."""
+    _, d, n, _ = interface(p, mirrored, reversed)
+    o = np.asarray(apex, dtype=float)
+    w0, w1 = p.lip_w/2, 0.35*p.lip_w
+    root = 0.4*p.H0  # anchors the lip; stays below the top surface for any bounded theta/phi
+    return Polygon([o - root*d - w0*n, o - w0*n, o + p.lip_L*d - w1*n, o + p.lip_L*d + w1*n,
+                    o + w0*n, o - root*d + w0*n])
+
+
+def lip_slot(p: BrickParams, apex, mirrored, reversed=False):
+    """Receiver for a lip, centred on a top apex; the entry is wider than the seat by the lip taper."""
+    _, d, n, _ = interface(p, mirrored, reversed)
+    o = np.asarray(apex, dtype=float)
+    c = p.clearance
+    depth = p.lip_L + p.slot_extra
+    reach = (p.amplitude + p.H0)/math.sin(math.radians(p.phi)) + 1
+    w0, w1 = p.lip_w/2 + c + 0.5, 0.35*p.lip_w + c
+    return Polygon([o - reach*d - w0*n, o - w0*n, o + depth*d - w1*n, o + depth*d + w1*n,
+                    o + w0*n, o - reach*d + w0*n])
+
+
+def end_region(p: BrickParams, d):
+    """Region between the brick's two end curves (scarfed and stepped ends tile by translation 2U).
+
+    Each end is a line through the end's mid-height along e (vertical blended toward
+    the insertion axis d by end_scarf); the lower half is offset by end_step toward +x.
+    The curve is a graph along e, so a brick can still slide along e past its neighbour.
+    """
+    k = p.end_scarf
+    e = (1 - k)*np.array([0., -1.]) + k*np.asarray(d)
+    e = e/np.linalg.norm(e)
+    ne = np.array([-e[1], e[0]])
+    if ne[0] < 0:
+        ne = -ne
+    S = 3*(p.H0 + p.amplitude) + p.tooth_L
+    zc = p.amplitude + p.H0/2
+
+    # Neighbours are separated by end_gap across both the scarf faces and the ledge face.
+    off = p.end_gap/2*(ne - np.sign(p.end_step)*e)
+
+    def curve(P):
+        return [P - S*e, P, P + p.end_step*ne, P + p.end_step*ne + S*e]
+    left = curve(np.array([-p.U, zc]) + off)
+    right = curve(np.array([p.U, zc]) - off)
+    return Polygon(left[::-1] + right).buffer(0)
 
 
 def tooth(p: BrickParams, keel, mirrored, reversed=False):
@@ -149,21 +223,40 @@ def brick_parts(p: BrickParams, part='A'):
     # Vertical ends through the coincident top/bottom peaks: the thinnest
     # section (H0). Course neighbours tile by translation; the order planner
     # keeps the slanted final approach clear of already placed neighbours.
-    body = _strip(p, -U + p.end_gap/2, U - p.end_gap/2, top_mirrored=top_m,
-                  bottom_mirrored=bottom_m, bottom_offset=0.)
+    shaped_ends = p.end_scarf > 0 or p.end_step != 0
+    if shaped_ends:
+        M = p.H0 + 2*p.amplitude + abs(p.end_step) + 5
+        body = _strip(p, -U - M, U + M, top_mirrored=top_m, bottom_mirrored=bottom_m, bottom_offset=0.)
+        body = body.intersection(end_region(p, interface(p, bottom_m, bottom_rev)[1]))
+    else:
+        body = _strip(p, -U + p.end_gap/2, U - p.end_gap/2, top_mirrored=top_m,
+                      bottom_mirrored=bottom_m, bottom_offset=0.)
     keel_u = U - p.valley_u if bottom_m else p.valley_u
     valley_u = U - p.valley_u if top_m else p.valley_u
     keels = [np.array([xl + keel_u, 0.]) for xl in (-U, 0.)]
     valleys = [np.array([xl + valley_u, H0]) for xl in (-U, 0.)]
     teeth = [tooth(p, k, mirrored=bottom_m, reversed=bottom_rev) for k in keels]
     slots = [slot(p, v, mirrored=top_m, reversed=top_rev) for v in valleys]
-    outer = unary_union([body, *teeth]).difference(unary_union(slots))
+    lips, lip_slots = [], []
+    if p.lip_L > 0:
+        h = p.amplitude
+        lips = [lip(p, (0., h), mirrored=bottom_m, reversed=bottom_rev)]
+        lip_slots = [lip_slot(p, (x, H0 + h), mirrored=top_m, reversed=top_rev) for x in (-U, 0., U)]
+    barbs = [barb(p, k, mirrored=bottom_m, reversed=bottom_rev) for k in keels] if p.barb_h > 0 else []
+    cuts = slots + lip_slots
+    if shaped_ends:
+        # Slanted ends reach into the neighbours' voxels: give way to their teeth and carry their slots.
+        shift = lambda gs: [affinity.translate(g, dx, 0.) for g in gs for dx in (-2*U, 2*U)]
+        body = body.difference(unary_union(shift(teeth + lips)).buffer(max(p.clearance, p.end_gap/2), join_style=2))
+        cuts = cuts + shift(cuts)
+    outer = unary_union([body, *teeth, *lips]).difference(unary_union(cuts))
     # Opening removes zero-width spikes left where cuts graze the steep faces.
     outer = outer.buffer(-0.01, join_style=2).buffer(0.01, join_style=2)
     fragments = 1 if outer.geom_type == 'Polygon' else len(outer.geoms)
     outer = _largest(outer)
-    return {'outer': outer, 'teeth': teeth, 'slots': slots, 'keels': keels, 'valleys': valleys,
-            'fragments': fragments}
+    # Barbs are soft-contact catches: kept out of the rigid outer, added to the printed solid.
+    return {'outer': outer, 'teeth': teeth + lips, 'slots': slots + lip_slots, 'barbs': barbs,
+            'keels': keels, 'valleys': valleys, 'fragments': fragments}
 
 
 def _largest(geom):
@@ -236,7 +329,7 @@ def lightening_holes(p: BrickParams, parts=None, channels=None):
         return []
     outer = parts['outer']
     keep = [s.buffer(p.wall) for s in parts['slots']]
-    keep += [t.buffer(p.wall) for t in parts['teeth']]
+    keep += [t.buffer(p.wall) for t in parts['teeth'] + parts.get('barbs', [])]
     for c in channels or []:
         if c is not None:
             keep.append(channel_footprint(p, c).buffer(p.wall))
@@ -268,7 +361,11 @@ def base_outer(p: BrickParams, voxels, thickness=6.0, direction=1):
     body = Polygon(np.vstack([top, [[x1, -thickness], [x0, -thickness]]]))
     vu = p.U - p.valley_u if m else p.valley_u
     valleys = [np.array([i*p.U + vu, 0.]) for i in range(voxels)]
-    cuts = unary_union([slot(p, v, mirrored=m, reversed=p.lean_mode == 'ab' and direction > 0) for v in valleys])
+    rev = p.lean_mode == 'ab' and direction > 0
+    cuts = [slot(p, v, mirrored=m, reversed=rev) for v in valleys]
+    if p.lip_L > 0:
+        cuts += [lip_slot(p, (i*p.U, p.amplitude), mirrored=m, reversed=rev) for i in range(voxels + 1)]
+    cuts = unary_union(cuts)
     return _largest(body.difference(cuts)), valleys
 
 

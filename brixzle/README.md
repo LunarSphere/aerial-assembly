@@ -6,8 +6,7 @@ trials, and tuned with NSGA-III. Drone dynamics are not modelled: a brick is a
 free body released at a sampled pose error above its lattice seat.
 
 This is a separate uv project pinned to Python 3.12 because CadQuery has no
-3.14 wheels. It reuses `aerial_assembly` from `../simulation` through an
-editable path dependency.
+3.14 wheels.
 
 ```bash
 cd brixzle
@@ -94,8 +93,7 @@ directory must be new.
   planner. Supporters go first, and the approach path is swept against placed bricks, so courses fill
   against the tooth stroke and the key brick goes last. It also has a running-bond voxel tiler.
 - `structures.py`: trial structures on anchored bases.
-- `scene.py`: MJCF built once, with parked gravity-compensated bodies activated one at a time (the
-  `aerial_assembly.chain` pattern).
+- `scene.py`: MJCF built once, with parked gravity-compensated bodies activated one at a time.
 - `trials.py`: drop MC, capture sweeps, sequential assembly (seating judged relative to the actual
   supporter, collapse = motion during a stage, floor contact, or sag > H0/2), push test.
 - `optimize.py`: pymoo NSGA-III. Objectives are −P(success), F_max, T, mass, and collisions; rules are
@@ -234,3 +232,73 @@ Next steps:
 - Give straights and turns a deeper Y gutter, or use the 3D project's square
   funnels on the cells: they captured about 95% of coarse drops.
 - Add T and X junction pieces built from the same cells for interior walls (rooms).
+
+## Span-weighted NSGA-III (`configs/nsga-span.json`, pick in `configs/nsga-span-chosen.json`)
+
+New search knobs (`optimize.py`):
+
+- `eval.span_weight` multiplies the overhang and bridge scores inside P(success)
+  (`eval.score_weights` sets the base weights). This run used 3. Overhangs are scored in both build
+  directions (12 bricks) and the bridge has 4-course arms, with two structure seeds.
+- The lean-mode gene now picks `alternate`, `uniform` or `ab`.
+- `run.patience` / `run.min_improve` stop the search when the best fixed-scale weighted score gains
+  less than `min_improve` for `patience` generations (CLI: `--patience`). Here it stopped at generation 8
+  (of a 30 cap) once the score sat at 0.247.
+
+Result: the pick is `ab`, V0-like geometry with a lower ramp angle (θ = 41.5°, α = 39.5°, 13.2 g).
+The search moved little from the seeds, so treat it as a modest refinement, not a new design. The
+early stop may have been premature: the score is flat after gen 5 because the best seed-derived design
+kept winning.
+
+Ideal-aim validation (stable bricks):
+
+| Design | overhang +x / −x (12) | bridge (3) | wall 3×4 |
+|---|---|---|---|
+| V0 | 4 / 3 | 7/7 | 10/10 |
+| nsga-chosen | 6 / 1 | 3/7 | 5/10 |
+| **nsga-span-chosen** | 5 / 5 | 7/7 | 10/10 |
+
+It is the only design that is symmetric in ±x and still completes the bridge and wall. With the full
+coarse error model (4 seeds), every design still fails within the first 0 to 3 bricks of a bridge or
+overhang, so the limit remains placement, not the geometry. This is the same conclusion as the A/B section.
+
+## Baseplate
+
+```bash
+uv run brixzle baseplate --params configs/nsga-span-chosen.json --n 4 --out runs/plate4 [--direction -1] [--step]
+```
+
+`baseplate.py` sweeps `profile.base_outer` through the brick's Y gutter for each of the n rows, fuses
+them, and cuts the bottom flat. The STL spans n·U × n·D and is watertight (`tests/test_baseplate.py`).
+
+## Concept genes and multi-parent search (`configs/nsga-concepts.json`)
+
+Three new brick concepts, each a gene where 0 gives the original brick (`params.CONCEPT_BOUNDS`):
+
+- **Capture lip** (`lip_L`, `lip_w`): a centre tooth under the brick's middle. Every brick centre sits
+  over a joint (overhang step, running bond) or a centre (stack bond), so each top carries a centre
+  slot and two end half-slots, and the base gets a slot at every voxel boundary.
+- **Snap barb** (`barb_h`, `barb_len`): a catch on each tooth's near flank with a pocket in the slot
+  wall. A rigid barb cannot pass the slot mouth, so it is simulated as soft contact (`barb_timeconst`,
+  uncalibrated) and kept out of the rigid outer profile.
+- **Scarfed / stepped ends** (`end_scarf`, `end_step`): the course-neighbour joint leans toward the
+  insertion axis, with a ledge one neighbour rests on. The planner check `course_insertable` rejects
+  shapes that block the vertical approach; scarfs much past 0.3 usually do.
+
+The run seeds 10 distinct parents (ab-tight, two lip variants, barb, two scarf-ledge variants, and
+thick-stiff, shallow-long, compact and loose-capture bodies), so crossover mixes concepts rather than
+near-clones. It scores tracked overhangs in both directions, an ideal 4-course bridge and a wall
+(span weight 2), and drops of A and B.
+
+Result (12 generations, early stop): no lip or barb design reached the top 30. The winner descends
+from the thick-stiff parent (`configs/ab-thick.json`: H0 19, tooth_L 8, 15.2 g). Validation
+(96 drops per case; overhang with ideal + tracked aim):
+
+| Design | Overhang +x / −x (20) | Bridge 3 | Wall 3×4 | Drops A, μ 0.2/0.35/0.5 | Drops B |
+|---|---|---|---|---|---|
+| ab-tight | 10 / 10 | 7/7 | 5/10 | 85 / 53 / 40% | 89 / 66 / 52% |
+| **ab-thick** | **11 / 11** | 7/7 | **10/10** | 80 / 54 / 54% | 82 / 62 / 49% |
+| nsga-concepts-chosen (lightest balanced) | 10 / 10 | 7/7 | 10/10 | 89 / 57 / 50% | 84 / 59 / 41% |
+
+A deeper body and longer teeth buy one more overhang brick and a completed wall at +1.2 g. The
+overhang still ends by sag, not by joints letting go.

@@ -3,19 +3,8 @@
 The parametric drop-assembled brick (CadQuery geometry, MuJoCo assembly trials,
 NSGA-III search) is in [`brixzle/`](brixzle/README.md).
 
-The simulation project, CAD files, saved drops, and Python environment are in
-[`simulation/`](simulation/README.md).
+Experiment 2's Lighthouse calibration, overhead RGB-D camera registration,
+and supervised tag hover checks are in the [flight guide](flight/README.md).
+Model weights and run captures stay local; see [detector setup](flight/README.md#drone-detector).
 
-From this repository root:
-
-```bash
-cd simulation
-source .venv/bin/activate
-aerial cad-drop goat_mk2 --config examples/cad-experiment.json --out runs/new-drop --video
-```
-
-Choose a new output directory for each drop. If your terminal was using the
-environment before the move, reactivate it with the command above.
-
-See the [simulation guide](simulation/README.md) for setup and commands, and
-[validation evidence](simulation/VALIDATION.md) for the timestep benchmarks.
+CAD exports (including the printable fork gripper) are in [`stl_exports/`](stl_exports/).

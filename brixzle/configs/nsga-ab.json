@@ -1,0 +1,77 @@
+{
+  "run": {
+    "pop": 35,
+    "gens": 40,
+    "partitions": 3,
+    "workers": 12,
+    "seed": 1,
+    "patience": 5,
+    "min_improve": 0.005
+  },
+  "eval": {
+    "base": {
+      "U": 25.0,
+      "D": 25.0,
+      "H0": 15.0,
+      "theta": 50.0,
+      "alpha": 38.0,
+      "gutter": 30.0,
+      "gutter_flat": 3.0,
+      "tooth_w": 5.0,
+      "tooth_L": 6.5,
+      "tip_chamfer": 1.5,
+      "tooth_taper": 2.0,
+      "clearance": 0.05,
+      "slot_extra": 1.0,
+      "mouth_chamfer": 1.5,
+      "end_gap": 0.3,
+      "wall": 1.2,
+      "lighten": true,
+      "fork_d": 2.0,
+      "fork_clearance": 0.3,
+      "infill": 1.0
+    },
+    "lean_mode": "ab",
+    "bounds": {
+      "clearance": [
+        0.03,
+        0.4
+      ]
+    },
+    "drop_samples": 16,
+    "frictions": [
+      0.2,
+      0.35,
+      0.5
+    ],
+    "drop_parts": [
+      "A",
+      "B"
+    ],
+    "overhang_n": 14,
+    "overhang_track": true,
+    "structures": [
+      "tower"
+    ],
+    "tower_h": 4,
+    "structure_seeds": [
+      1,
+      2,
+      3
+    ],
+    "score_weights": {
+      "drop": 1.0,
+      "overhang": 1.0,
+      "tower": 1.0
+    },
+    "span_weight": 2.0,
+    "weights": {
+      "p": 1.0,
+      "f": 0.15,
+      "t": 0.15,
+      "m": 0.3,
+      "c": 0.15
+    },
+    "error": {}
+  }
+}

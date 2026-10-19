@@ -1,0 +1,16 @@
+{
+  "_comment": "Fork with two MISUMI MSH2-30 pins (2 mm h7, 30 mm, 440C) pressed into a PLA plate. 30 = gap 5 + bore engagement 19 + press depth 6, so the tips stop 6 mm short of the V0 brick's far face (protrude -6). Gap 5 needs the fixture's 3 mm tine guides: fly with configs/fly-msh2-30.json.",
+  "family": "fork",
+  "tine_d": 2.0,
+  "tine_material": "steel",
+  "pin_length": 30.0,
+  "press_d": 1.9,
+  "boss_d": 5.0,
+  "protrude": -6.0,
+  "lead_in": 1.0,
+  "gap": 5.0,
+  "clear_guard": 8.0,
+  "plate_t": 1.6,
+  "plate_margin": 3.0,
+  "bracket_t": 2.0
+}

@@ -1,0 +1,14 @@
+{
+  "_sources": {
+    "crazyflow": "learnsyslab/crazyflow d28ec70, dynamics/first_principles/params.toml [cf21B_500]: mass 0.0434 kg, thrust_max 0.2 N/motor",
+    "datasheet": "Bitcraze Crazyflie 2.1 Brushless datasheet (https://www.bitcraze.io/documentation/hardware/crazyflie_2_1_brushless/crazyflie_2_1_brushless-datasheet.pdf): 34 g takeoff with legs, 37 g with guards, up to 30 g thrust per motor, 40 g max recommended payload, 10 min flight",
+    "lighthouse_deck": "Bitcraze Lighthouse positioning deck product page (https://www.bitcraze.io/products/lighthouse-positioning-deck/): 2.7 g"
+  },
+  "body_mass_g": 43.4,
+  "deck_mass_g": 2.7,
+  "thrust_source": "datasheet",
+  "thrust_per_motor_N": {"datasheet": 0.2942, "crazyflow": 0.2},
+  "tw_min": 1.5,
+  "payload_max_g": 30.0,
+  "flight_time_unloaded_s": 600.0
+}

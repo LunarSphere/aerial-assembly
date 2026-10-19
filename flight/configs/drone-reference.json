@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "image": "drone-reference.jpg",
+  "bbox_xyxy": [
+    858,
+    362,
+    933,
+    433
+  ],
+  "description": "Visual references of the actual CF21B at its original support and two positions/backgrounds. Every class denotes the same drone; runtime uses class-agnostic suppression.",
+  "references": [
+    {
+      "image": "drone-reference.jpg",
+      "bbox_xyxy": [
+        858,
+        362,
+        933,
+        433
+      ]
+    },
+    {
+      "image": "drone-reference-origin.jpg",
+      "bbox_xyxy": [
+        900,
+        413,
+        963,
+        481
+      ]
+    },
+    {
+      "image": "drone-reference-x.jpg",
+      "bbox_xyxy": [
+        411,
+        462,
+        478,
+        528
+      ]
+    }
+  ]
+}

@@ -34,6 +34,14 @@ class BrickParams:
     fork_d: float = 2.0         # fork tine (rod) diameter
     fork_clearance: float = 0.3 # radial clearance around each tine
     infill: float = 1.0         # printed mass fraction relative to solid
+    # Concept genes (0 disables each, giving the original brick).
+    lip_L: float = 0.0          # capture lip: centre tooth under the brick's middle; receivers are top slots
+    lip_w: float = 4.0          #   at the centre and half-slots at both ends (always a joint or centre below)
+    barb_h: float = 0.0         # snap barb on each tooth's near flank (soft contact), pocket in the slot wall
+    barb_len: float = 2.0       #   barb length along the tooth axis
+    barb_timeconst: float = 0.02  # contact time constant of the barb (softer = easier snap); uncalibrated
+    end_scarf: float = 0.0      # end faces: 0 vertical, 1 parallel to the insertion axis
+    end_step: float = 0.0       # stepped scarf: signed ledge depth (mm) on the lower half of the +x end
 
     @property
     def uniform(self):
@@ -82,6 +90,16 @@ BOUNDS = {
     'tooth_taper': (0.0, 3.0),
     'clearance': (0.1, 0.6),
     'mouth_chamfer': (0.3, 3.0),
+}
+
+# Concept genes, searched when a run lists them (see optimize.EvalConfig.bounds).
+CONCEPT_BOUNDS = {
+    'lip_L': (0.0, 7.0),
+    'lip_w': (2.5, 6.0),
+    'barb_h': (0.0, 1.2),
+    'barb_len': (1.0, 3.0),
+    'end_scarf': (0.0, 1.0),
+    'end_step': (-3.0, 3.0),
 }
 
 

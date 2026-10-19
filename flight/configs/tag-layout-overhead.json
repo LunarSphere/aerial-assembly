@@ -1,0 +1,126 @@
+{
+  "version": 1,
+  "kind": "tag-layout",
+  "family": "25h9",
+  "coordinate_frame": "tag_plane",
+  "source": "rgbd_estimate",
+  "accepted_for_flight": false,
+  "reference_distance_m": 1.0082186010574703,
+  "camera_height_above_tag_plane_m": 1.529025354060481,
+  "plane_stats": {
+    "inliers": 2948,
+    "points": 2948,
+    "rms_m": 0.002457824492883195
+  },
+  "tags": [
+    {
+      "id": 0,
+      "role": "origin",
+      "size_m": 0.07019451583837535,
+      "pose": {
+        "pos": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "quat": [
+          0.01718947482230167,
+          0.0,
+          0.0,
+          -0.9998522500626448
+        ]
+      },
+      "survey_source": "rgbd_estimate",
+      "independently_verified": false
+    },
+    {
+      "id": 1,
+      "role": "x",
+      "size_m": 0.07084735337935977,
+      "pose": {
+        "pos": [
+          1.0082186010574703,
+          0.0,
+          0.0
+        ],
+        "quat": [
+          0.008585182220845991,
+          0.0,
+          0.0,
+          0.9999631466440325
+        ]
+      },
+      "survey_source": "rgbd_estimate",
+      "independently_verified": false
+    },
+    {
+      "id": 2,
+      "role": "xy",
+      "size_m": 0.0705297225917687,
+      "pose": {
+        "pos": [
+          0.44149534584950356,
+          -0.3676592746281333,
+          0.0
+        ],
+        "quat": [
+          0.0015496941651256563,
+          0.0,
+          0.0,
+          0.9999987992232764
+        ]
+      },
+      "survey_source": "rgbd_estimate",
+      "independently_verified": false
+    },
+    {
+      "id": 3,
+      "role": "check",
+      "size_m": 0.07092073850516495,
+      "pose": {
+        "pos": [
+          0.0064889964078964175,
+          -0.853653624378641,
+          0.0
+        ],
+        "quat": [
+          0.026194685805480334,
+          0.0,
+          0.0,
+          -0.9996568603453648
+        ]
+      },
+      "survey_source": "rgbd_estimate",
+      "independently_verified": false
+    },
+    {
+      "id": 4,
+      "role": "check",
+      "size_m": 0.07131209571745448,
+      "pose": {
+        "pos": [
+          0.9811554516556211,
+          -0.8555758929284006,
+          0.0
+        ],
+        "quat": [
+          0.021581774830521105,
+          0.0,
+          0.0,
+          -0.9997670863732036
+        ]
+      },
+      "survey_source": "rgbd_estimate",
+      "independently_verified": false
+    }
+  ],
+  "profile": {
+    "backend": "realsense",
+    "device": "262822301178",
+    "width": 1280,
+    "height": 720,
+    "fps": 15
+  },
+  "note": "Initial camera estimates, not independent ground truth. Confirm the 1 m baseline and survey check tags.",
+  "evidence_directory": "runs/tag-survey-20261015-auto"
+}

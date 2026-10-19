@@ -1,0 +1,552 @@
+{
+  "version": 1,
+  "name": "tower6:1",
+  "settings": {
+    "setpoint_hz": 20,
+    "transit_z": 0.15433532713408737,
+    "takeoff_z": 0.2253,
+    "takeoff_s": 2.0,
+    "land_s": 2.5,
+    "return_s": 3.0,
+    "settle_s": 0.3,
+    "emergency_land_z": 0.07433532713408737,
+    "max_pick_retries": 2,
+    "max_place_retries": 1,
+    "ctrl_mass_kg": {
+      "empty": 0.05058953775536323,
+      "loaded": 0.06430162325047949
+    },
+    "tolerance": {
+      "seat_xz_m": 0.0025,
+      "seat_y_m": 0.004,
+      "seat_angle_deg": 3.9,
+      "pick_gone_m": 0.005,
+      "recover_m": 0.03
+    },
+    "battery": {
+      "flight_time_s": 364.22498465267574,
+      "per_brick_s": 21.46152171311174,
+      "reserve_s": 60.0
+    },
+    "geofence": {
+      "min": [
+        -0.5,
+        -0.55,
+        -0.04
+      ],
+      "max": [
+        0.275,
+        0.25,
+        0.45433532713408736
+      ]
+    },
+    "limits": {
+      "v_max": 1.0,
+      "a_max": 2.0
+    },
+    "params": {
+      "ctrlMel.ki_m_xy": 100000.0,
+      "ctrlMel.i_range_m_xy": 0.1
+    },
+    "planner": {
+      "v_transit": 0.25,
+      "min_go_to_s": 1.5,
+      "standoff_mm": 10.0,
+      "v_engage": 0.05,
+      "v_lift": 0.03,
+      "lift_mm": 40.0,
+      "v_descend": 0.06,
+      "v_stroke": 0.02,
+      "v_release": 0.04,
+      "press_mm": 1.0,
+      "unload_mm": 0.3,
+      "pre_clear_mm": 10.0,
+      "retreat_mm": 40.0,
+      "clear_view_mm": 130.0,
+      "transit_margin_mm": 50.0,
+      "aim_low_mm": 1.5,
+      "align_s": 2.0,
+      "settle_s": 0.3,
+      "align_wait_s": 1.0,
+      "hold_s": 0.5,
+      "takeoff_mm": 150.0,
+      "setpoint_hz": 20,
+      "max_pick_retries": 2,
+      "max_place_retries": 1,
+      "yaw_in_transit": false,
+      "battery_reserve_s": 60.0,
+      "gains": [
+        [
+          "ki_m_xy",
+          100000.0
+        ],
+        [
+          "i_range_m_xy",
+          0.1
+        ]
+      ]
+    }
+  },
+  "home": {
+    "pos": [
+      -0.25,
+      -0.3,
+      0.07529999999999999
+    ],
+    "yaw": 0.0
+  },
+  "bases": {
+    "base0": {
+      "pos": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "quat": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    }
+  },
+  "bricks": [
+    {
+      "name": "b0_0",
+      "course": 0,
+      "i0": 0,
+      "part": "A",
+      "orientation": "A",
+      "slot": 0,
+      "carry": [
+        0.0025551480918180854,
+        0.0033190291633821865,
+        -0.05921325723564367
+      ],
+      "pick": {
+        "slot_nominal": {
+          "pos": [
+            0.0,
+            -0.3,
+            0.0
+          ],
+          "quat": [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "segments": [
+          {
+            "phase": "GOTO_PREPICK",
+            "op": "go_to",
+            "to": [
+              -0.0025551480918180854,
+              -0.042319029163382184,
+              0.05771325723564367
+            ],
+            "z_world": 0.15433532713408737,
+            "duration": 1.5
+          },
+          {
+            "phase": "ALIGN",
+            "op": "go_to",
+            "to": [
+              -0.0025551480918180854,
+              -0.042319029163382184,
+              0.05771325723564367
+            ],
+            "duration": 2.0
+          },
+          {
+            "phase": "ALIGN",
+            "op": "wait",
+            "duration": 1.0
+          },
+          {
+            "phase": "ENGAGE",
+            "op": "line",
+            "to": [
+              -0.0025551480918180854,
+              -0.0033190291633821865,
+              0.05771325723564367
+            ],
+            "duration": 0.7799999999999999
+          },
+          {
+            "phase": "ENGAGE",
+            "op": "hold",
+            "duration": 0.5
+          },
+          {
+            "phase": "LIFT",
+            "op": "param",
+            "name": "ctrlMel.mass",
+            "value": 0.06430162325047949
+          },
+          {
+            "phase": "LIFT",
+            "op": "hold",
+            "duration": 0.5
+          },
+          {
+            "phase": "LIFT",
+            "op": "line",
+            "to": [
+              -0.0025551480918180854,
+              -0.0033190291633821865,
+              0.06771325723564367
+            ],
+            "duration": 0.2833333333333334
+          },
+          {
+            "phase": "LIFT",
+            "op": "line",
+            "to": [
+              -0.0025551480918180854,
+              -0.0033190291633821865,
+              0.10771325723564368
+            ],
+            "duration": 1.3333333333333335
+          },
+          {
+            "phase": "LIFT",
+            "op": "go_to",
+            "to": [
+              -0.0025551480918180854,
+              -0.1333190291633822,
+              0.10771325723564368
+            ],
+            "duration": 1.5
+          }
+        ],
+        "abort": [
+          {
+            "phase": "ABORT_PICK",
+            "op": "param",
+            "name": "ctrlMel.mass",
+            "value": 0.05058953775536323
+          },
+          {
+            "phase": "ABORT_PICK",
+            "op": "line",
+            "to": [
+              -0.0025551480918180854,
+              -0.042319029163382184,
+              0.05921325723564367
+            ],
+            "duration": 0.7799999999999999
+          },
+          {
+            "phase": "ABORT_PICK",
+            "op": "line",
+            "to": [
+              -0.0025551480918180854,
+              -0.042319029163382184,
+              0.09921325723564367
+            ],
+            "duration": 1.3333333333333335
+          },
+          {
+            "phase": "ABORT_PICK",
+            "op": "go_to",
+            "to": [
+              -0.0025551480918180854,
+              -0.1723190291633822,
+              0.09921325723564367
+            ],
+            "duration": 1.5
+          }
+        ]
+      },
+      "place": {
+        "frame": {
+          "supporter": "base0",
+          "rel": {
+            "pos": [
+              0.025,
+              0.0,
+              0.0
+            ],
+            "quat": [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "nominal": {
+            "pos": [
+              0.025,
+              0.0,
+              0.0
+            ],
+            "quat": [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "segments": [
+          {
+            "phase": "TRANSIT",
+            "op": "go_to",
+            "to": [
+              -0.007172609156760522,
+              -0.0033190291633821865,
+              0.0921416869139859
+            ],
+            "z_world": 0.15433532713408737,
+            "duration": 1.7320003015937588
+          },
+          {
+            "phase": "PREPLACE",
+            "op": "go_to",
+            "to": [
+              -0.007172609156760522,
+              -0.0033190291633821865,
+              0.0921416869139859
+            ],
+            "duration": 2.0
+          },
+          {
+            "phase": "PREPLACE",
+            "op": "wait",
+            "duration": 1.0
+          },
+          {
+            "phase": "DESCEND",
+            "op": "line",
+            "to": [
+              -0.007172609156760522,
+              -0.0033190291633821865,
+              0.06712333788769409
+            ],
+            "duration": 0.4169724837715302
+          },
+          {
+            "phase": "DESCEND",
+            "op": "line",
+            "to": [
+              -0.0019394866164924272,
+              -0.0033190291633821865,
+              0.058425246482036945
+            ],
+            "duration": 0.5075489277464506
+          },
+          {
+            "phase": "DESCEND",
+            "op": "hold",
+            "duration": 0.5
+          },
+          {
+            "phase": "RELEASE",
+            "op": "param",
+            "name": "ctrlMel.mass",
+            "value": 0.05058953775536323
+          },
+          {
+            "phase": "RELEASE",
+            "op": "line",
+            "to": [
+              -0.0019394866164924272,
+              -0.0033190291633821865,
+              0.058125246482036944
+            ],
+            "duration": 0.3
+          },
+          {
+            "phase": "RELEASE",
+            "op": "line",
+            "to": [
+              -0.0019394866164924272,
+              -0.042319029163382184,
+              0.058125246482036944
+            ],
+            "duration": 0.975
+          },
+          {
+            "phase": "RETREAT",
+            "op": "line",
+            "to": [
+              -0.0019394866164924272,
+              -0.042319029163382184,
+              0.09812524648203694
+            ],
+            "duration": 1.3333333333333335
+          },
+          {
+            "phase": "RETREAT",
+            "op": "go_to",
+            "to": [
+              -0.0019394866164924272,
+              -0.17231902916338218,
+              0.09812524648203694
+            ],
+            "duration": 1.5
+          }
+        ]
+      }
+    }
+  ],
+  "sim": {
+    "params": {
+      "U": 25.0,
+      "D": 25.0,
+      "H0": 15.0,
+      "theta": 50.0,
+      "alpha": 38.0,
+      "gutter": 30.0,
+      "gutter_flat": 3.0,
+      "tooth_w": 5.0,
+      "tooth_L": 6.5,
+      "tip_chamfer": 1.5,
+      "tooth_taper": 2.0,
+      "clearance": 0.3,
+      "slot_extra": 1.0,
+      "mouth_chamfer": 1.5,
+      "end_gap": 0.3,
+      "wall": 1.2,
+      "lighten": true,
+      "lean_mode": "alternate",
+      "fork_d": 2.0,
+      "fork_clearance": 0.3,
+      "infill": 1.0,
+      "lip_L": 0.0,
+      "lip_w": 4.0,
+      "barb_h": 0.0,
+      "barb_len": 2.0,
+      "barb_timeconst": 0.02,
+      "end_scarf": 0.0,
+      "end_step": 0.0
+    },
+    "gripper": {
+      "family": "fork",
+      "tine_d": 2.0,
+      "tine_material": "pla",
+      "protrude": 4.0,
+      "lead_in": 2.0,
+      "gap": 8.0,
+      "clear_guard": 8.0,
+      "plate_t": 1.6,
+      "plate_margin": 3.0,
+      "bracket_t": 2.0,
+      "detent_h": 0.0
+    },
+    "structure": "tower",
+    "bricks": 1,
+    "config": {
+      "physics": {
+        "timestep": 0.001,
+        "friction": 0.35,
+        "contact_timeconst": 0.004,
+        "contact_dampratio": 1.0,
+        "iterations": 50
+      },
+      "drone": {
+        "body_mass_g": 43.4,
+        "deck_mass_g": 2.7,
+        "thrust_source": "datasheet",
+        "thrust_per_motor_N": {
+          "datasheet": 0.2942,
+          "crazyflow": 0.2
+        },
+        "tw_min": 1.5,
+        "payload_max_g": 30.0,
+        "flight_time_unloaded_s": 600.0
+      },
+      "lighthouse": {
+        "bias_sigma_mm": 6.3,
+        "bias_gradient_mm_per_m": 0.0,
+        "jitter_mm": 0.7,
+        "vel_noise_mps": 0.005,
+        "att_noise_deg": 0.1,
+        "latency_s": 0.01,
+        "registered": true,
+        "scale": 1.0
+      },
+      "camera": {
+        "sigma_pos_mm": 0.5,
+        "sigma_angle_deg": 0.3,
+        "occlusion_radius_mm": 70.0
+      },
+      "fixture": {
+        "origin": [
+          0.0,
+          -300.0,
+          0.0
+        ],
+        "pitch": 160.0,
+        "prerotate_B": true,
+        "guard_span": 139.6,
+        "margin": 10.0,
+        "stand_xy": [
+          -250.0,
+          -300.0
+        ],
+        "stand_z": 60.0,
+        "floor_z": -40.0,
+        "funnel": true,
+        "funnel_mouth": 5.0,
+        "funnel_len": 6.0,
+        "funnel_gap": 1.0,
+        "funnel_t": 1.6,
+        "hooked": false,
+        "pocket_clearance": 0.4
+      },
+      "planner": {
+        "v_transit": 0.25,
+        "min_go_to_s": 1.5,
+        "standoff_mm": 10.0,
+        "v_engage": 0.05,
+        "v_lift": 0.03,
+        "lift_mm": 40.0,
+        "v_descend": 0.06,
+        "v_stroke": 0.02,
+        "v_release": 0.04,
+        "press_mm": 1.0,
+        "unload_mm": 0.3,
+        "pre_clear_mm": 10.0,
+        "retreat_mm": 40.0,
+        "clear_view_mm": 130.0,
+        "transit_margin_mm": 50.0,
+        "aim_low_mm": 1.5,
+        "align_s": 2.0,
+        "settle_s": 0.3,
+        "align_wait_s": 1.0,
+        "hold_s": 0.5,
+        "takeoff_mm": 150.0,
+        "setpoint_hz": 20,
+        "max_pick_retries": 2,
+        "max_place_retries": 1,
+        "yaw_in_transit": false,
+        "battery_reserve_s": 60.0,
+        "gains": [
+          [
+            "ki_m_xy",
+            100000.0
+          ],
+          [
+            "i_range_m_xy",
+            0.1
+          ]
+        ]
+      },
+      "tolerance": {
+        "seat_xz": 1.0,
+        "seat_y": 2.5,
+        "seat_angle": 3.0,
+        "drift": 2.0,
+        "lin_speed": 0.002,
+        "ang_speed": 0.05,
+        "settle_hold": 0.08,
+        "max_time": 1.5
+      },
+      "n_slots": 2,
+      "keep_going": false
+    }
+  }
+}

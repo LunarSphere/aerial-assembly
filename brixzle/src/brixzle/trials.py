@@ -11,7 +11,7 @@ import mujoco
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from aerial_assembly.config import Physics
+from .config import Physics
 
 from . import lattice as L
 from .params import BrickParams
