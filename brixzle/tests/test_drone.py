@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from scipy.spatial.transform import Rotation
 
-from aerial_assembly.config import Physics
+from brixzle.config import Physics
 from brixzle import cad, drone as D, scene
 from brixzle.cf import rot
 from brixzle.drone_params import CF21B, DroneConfig, G

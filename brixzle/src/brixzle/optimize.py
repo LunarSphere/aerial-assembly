@@ -22,7 +22,7 @@ from pymoo.optimize import minimize
 from pymoo.parallelization import StarmapParallelization
 from pymoo.util.ref_dirs import get_reference_directions
 
-from aerial_assembly.config import Physics
+from .config import Physics
 
 from . import cad, rules as R, structures as S, trials as T
 from . import lattice as L, profile as pr

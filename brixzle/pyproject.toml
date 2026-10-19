@@ -8,7 +8,6 @@ version = "0.1.0"
 description = "Parametric drop-assembled bricks: CadQuery geometry, MuJoCo assembly trials, NSGA-III search"
 requires-python = "==3.12.*"
 dependencies = [
-    "aerial-assembly",
     "flight",
     "cadquery>=2.5",
     "mujoco==3.13.0",
@@ -29,7 +28,6 @@ video = ["pillow>=12,<13", "imageio>=2.37,<3", "imageio-ffmpeg>=0.6,<1"]
 brixzle = "brixzle.cli:main"
 
 [tool.uv.sources]
-aerial-assembly = { path = "../simulation", editable = true }
 flight = { path = "../flight", editable = true }
 
 [tool.setuptools.packages.find]

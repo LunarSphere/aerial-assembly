@@ -6,8 +6,7 @@ trials, and tuned with NSGA-III. Drone dynamics are not modelled: a brick is a
 free body released at a sampled pose error above its lattice seat.
 
 This is a separate uv project pinned to Python 3.12 because CadQuery has no
-3.14 wheels. It reuses `aerial_assembly` from `../simulation` through an
-editable path dependency.
+3.14 wheels.
 
 ```bash
 cd brixzle
@@ -94,8 +93,7 @@ directory must be new.
   planner. Supporters go first, and the approach path is swept against placed bricks, so courses fill
   against the tooth stroke and the key brick goes last. It also has a running-bond voxel tiler.
 - `structures.py`: trial structures on anchored bases.
-- `scene.py`: MJCF built once, with parked gravity-compensated bodies activated one at a time (the
-  `aerial_assembly.chain` pattern).
+- `scene.py`: MJCF built once, with parked gravity-compensated bodies activated one at a time.
 - `trials.py`: drop MC, capture sweeps, sequential assembly (seating judged relative to the actual
   supporter, collapse = motion during a stage, floor contact, or sag > H0/2), push test.
 - `optimize.py`: pymoo NSGA-III. Objectives are −P(success), F_max, T, mass, and collisions; rules are

@@ -51,7 +51,7 @@ def reference(out):
 
 def port(rotor0=20000.):
     import mujoco
-    from aerial_assembly.config import Physics
+    from brixzle.config import Physics
     from brixzle import cad, drone as D, scene
     from brixzle.drone_params import DroneConfig
     from brixzle.estimator import Lighthouse, LighthouseModel

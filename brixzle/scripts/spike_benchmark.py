@@ -14,7 +14,7 @@ import time
 import mujoco
 import numpy as np
 
-from aerial_assembly.config import Physics
+from brixzle.config import Physics
 from brixzle import cad, drone as D, gripper as Gr, lattice as L, scene, structures as S
 from brixzle.drone_params import CF21B
 from brixzle.estimator import Lighthouse, LighthouseModel

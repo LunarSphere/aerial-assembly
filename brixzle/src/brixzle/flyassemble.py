@@ -12,7 +12,7 @@ import math
 import mujoco
 import numpy as np
 
-from aerial_assembly.config import Physics
+from .config import Physics
 from flight.frames import Pose
 from flight.mission import Mission
 

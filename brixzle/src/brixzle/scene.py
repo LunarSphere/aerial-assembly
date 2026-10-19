@@ -1,7 +1,6 @@
 """MJCF scene: anchored bases, a floor, and a pool of parked brick bodies.
 
-Follows ``aerial_assembly.chain._model``: compile once with every brick the
-trial may need, park unused bricks far away under gravity compensation, and
+Compile once with every brick the trial may need, park unused bricks far away under gravity compensation, and
 activate them one at a time. Geometry arrives in millimetres and leaves in SI.
 """
 import xml.etree.ElementTree as ET
@@ -9,7 +8,7 @@ import xml.etree.ElementTree as ET
 import mujoco
 import numpy as np
 
-from aerial_assembly.config import Physics
+from .config import Physics
 
 from .cad import build_base
 from .params import BrickParams

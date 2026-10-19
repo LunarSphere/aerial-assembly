@@ -15,7 +15,7 @@ from cflib.crazyflie.param import Param
 from cflib.crazyflie.supervisor import Supervisor
 from cflib.crazyflie.syncCrazyflie import SyncCrazyflie
 
-from aerial_assembly.config import Physics
+from brixzle.config import Physics
 from brixzle import cad, drone as D, flyassemble as FA, scene, simcf
 from brixzle.drone_params import CF21B
 from brixzle.estimator import Lighthouse, LighthouseModel

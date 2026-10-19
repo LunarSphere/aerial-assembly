@@ -7,7 +7,7 @@ import sys
 
 import numpy as np
 
-from aerial_assembly.config import Physics, read_json, write_json
+from .config import Physics, read_json, write_json
 
 from . import cad, profile as pr, rules as R, structures as S, trials as T
 from .params import V0, BrickParams
