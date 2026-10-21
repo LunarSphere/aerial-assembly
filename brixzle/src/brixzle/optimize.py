@@ -30,7 +30,6 @@ from .params import BOUNDS, CONCEPT_BOUNDS, V0, BrickParams, with_vector
 
 OBJECTIVES = ['neg_p_success', 'f_max_N', 't_assembly_s', 'mass_g', 'collisions']
 # Rules whose margins are uninformative as constraints (always satisfied by bounds).
-LEAN_MODES = ('alternate', 'uniform', 'ab')  # last gene in [0, 1] picks one
 SKIP_RULES = {'tooth_strength', 'mass_min'}
 
 
@@ -48,9 +47,8 @@ class EvalConfig:
     score_weights: dict = field(default_factory=lambda: {'drop': 1., 'overhang': 1., 'wall': 1., 'bridge': 1.})
     span_weight: float = 1.0
     error: dict = field(default_factory=dict)  # overrides for trials.ErrorModel
-    # Search setup: base params (seed centre and unsearched fields), a fixed lean mode, bound overrides.
+    # Search setup: base params (seed centre and unsearched fields) and bound overrides.
     base: dict = field(default_factory=dict)
-    lean_mode: str = ''         # '' lets the last gene choose
     bounds: dict = field(default_factory=dict)
     # Trials: which parts to drop, overhang aim (tracked = aim at the supporter's measured pose),
     # and which coarse-placement structures to run per seed.
@@ -66,6 +64,8 @@ class EvalConfig:
     @classmethod
     def from_dict(cls, d):
         d = dict(d)
+        if d.pop('lean_mode', 'ab') != 'ab':
+            raise ValueError("only the A/B design exists; drop eval.lean_mode")
         for k in ('frictions', 'wall', 'structure_seeds', 'drop_parts', 'structures', 'ideal_structures', 'genes'):
             if k in d:
                 d[k] = tuple(d[k])
@@ -92,11 +92,9 @@ def search_bounds(names, ec: EvalConfig):
 
 
 def decode(x, names, ec: EvalConfig = None):
-    """Continuous vector -> BrickParams; the last gene picks the lean mode (thirds of [0, 1]) unless fixed."""
+    """Continuous vector -> BrickParams."""
     ec = ec or EvalConfig()
-    p = with_vector(base_params(ec), names, x[:-1])
-    mode = ec.lean_mode or LEAN_MODES[min(int(x[-1]*len(LEAN_MODES)), len(LEAN_MODES) - 1)]
-    return replace(p, lean_mode=mode)
+    return with_vector(base_params(ec), names, x)
 
 
 def evaluate(p: BrickParams, ec: EvalConfig):
@@ -119,7 +117,7 @@ def evaluate(p: BrickParams, ec: EvalConfig):
         for mu in ec.frictions:
             cfg = T.TrialConfig(physics=Physics(timestep=0.001, friction=mu, contact_timeconst=0.004,
                                                 iterations=50), error=err)
-            for part in ec.drop_parts if p.lean_mode == 'ab' else ('A',):
+            for part in ec.drop_parts:
                 rows, _ = T.drop_trials(p, bricks, cfg, samples=ec.drop_samples, seed=int(mu*1000), part=part)
                 drops += rows
         ds = T.summarize_drops(drops)
@@ -162,7 +160,7 @@ def course_insertable(p: BrickParams):
     """
     if p.end_scarf <= 0 and p.end_step == 0:
         return 1.
-    outer = {k: pr.brick_parts(p, k)['outer'] for k in (('A', 'B') if p.lean_mode == 'ab' else ('A',))}
+    outer = L.outers(p)
     try:
         for s in (S.wall(3, 2), S.bridge(2)):
             L.assembly_order(p, s, outer)
@@ -181,8 +179,8 @@ def _eval_job(x, names, ec_dict):
 class BrickProblem(ElementwiseProblem):
     def __init__(self, names, ec: EvalConfig, constraint_names, log, **kwargs):
         lo, hi = search_bounds(names, ec)
-        super().__init__(n_var=len(lo) + 1, n_obj=len(OBJECTIVES), n_ieq_constr=len(constraint_names),
-                         xl=np.r_[lo, 0.], xu=np.r_[hi, 1.], **kwargs)
+        super().__init__(n_var=len(lo), n_obj=len(OBJECTIVES), n_ieq_constr=len(constraint_names),
+                         xl=lo, xu=hi, **kwargs)
         self.names, self.ec, self.constraint_names, self.log = names, ec, constraint_names, log
 
     def _evaluate(self, x, out, *args, **kwargs):
@@ -249,25 +247,24 @@ def select(F, weights):
 
 
 def seed_population(names, size, rng, spread=0.15, ec: EvalConfig = None):
-    """Base params (every lean mode) plus Gaussian perturbations: start near the educated guess."""
+    """Base params plus Gaussian perturbations: start near the educated guess."""
     ec = ec or EvalConfig()
     lo, hi = search_bounds(names, ec)
     b0 = base_params(ec)
     if ec.parents:
         # Distinct parent designs, then perturbations of each in turn, so crossover mixes concepts.
         centres = [np.clip([ov.get(n, getattr(b0, n)) for n in names], lo, hi) for ov in ec.parents.values()]
-        rows = [np.r_[c, rng.uniform()] for c in centres]
+        rows = [np.asarray(c) for c in centres]
         k = 0
         while len(rows) < size:
             c = centres[k % len(centres)]
-            rows.append(np.r_[np.clip(c + rng.normal(0, spread/3, len(names))*(hi - lo), lo, hi), rng.uniform()])
+            rows.append(np.clip(c + rng.normal(0, spread/3, len(names))*(hi - lo), lo, hi))
             k += 1
         return np.array(rows[:size])
     base = np.clip([getattr(b0, n) for n in names], lo, hi)
-    rows = [np.r_[base, (i + .5)/len(LEAN_MODES)] for i in range(len(LEAN_MODES))]
+    rows = [base]
     while len(rows) < size:
-        x = np.clip(base + rng.normal(0, spread, len(names))*(hi - lo), lo, hi)
-        rows.append(np.r_[x, rng.uniform()])
+        rows.append(np.clip(base + rng.normal(0, spread, len(names))*(hi - lo), lo, hi))
     return np.array(rows)
 
 

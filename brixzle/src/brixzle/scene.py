@@ -10,7 +10,7 @@ import numpy as np
 
 from .config import Physics
 
-from .cad import build_base
+from .cad import as_pair, build_base
 from .params import BrickParams
 
 MM = 1e-3
@@ -45,8 +45,11 @@ def build_scene(p: BrickParams, brick, bases, n_bricks, physics: Physics, visual
     ``sleep`` lets resting islands sleep (MuJoCo wakes them on contact, applied
     force or velocity changes); drone scenes need it to stay affordable.
     """
-    bundles = brick if 'collision' not in brick else {'A': brick}
     body_parts = list(body_parts or ['A']*n_bricks)
+    if 'collision' in brick:
+        bundles = {brick.get('part', 'A'): brick} if set(body_parts) <= {brick.get('part', 'A')} else as_pair(brick)
+    else:
+        bundles = brick
     root = ET.Element('mujoco', model='brixzle')
     ET.SubElement(root, 'compiler', angle='radian', inertiafromgeom='false')
     ET.SubElement(root, 'size', memory='256M')

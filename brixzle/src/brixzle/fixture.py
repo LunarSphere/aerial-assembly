@@ -3,10 +3,11 @@
 Each slot is the anchored base of a course-0 placement (``cad.build_base`` over voxels
 [-1, 3), the tower's base), so the waiting brick is seated and hooked exactly as on a real
 first course. A slot strip is only D deep in Y, so both Y faces are open for the fork's
-tines. Slots sit ``pitch`` apart along X (at least the prop-guard span). A slot may be turned
-180 degrees about Z (``orientation='B'``), pre-orienting bricks for odd courses in the
-'alternate' lean mode; otherwise the drone yaws 180 degrees in transit. Also builds the
-launch stand: two rails under the prop-guard legs so the hanging gripper clears the floor.
+tines. Slots sit ``pitch`` apart along X (at least the prop-guard span). Each slot has a
+*kind*: the part it holds ('A' or 'B', each with its own base profile) plus 'r' when the
+slot is turned 180 degrees about Z, pre-orienting bricks for -x builds (otherwise the drone
+yaws 180 degrees in transit). Also builds the launch stand: two rails under the prop-guard
+legs so the hanging gripper clears the floor.
 Units: mm and degrees; poses are (pos_mm, quat_wxyz).
 """
 from dataclasses import asdict, dataclass, field
@@ -48,10 +49,14 @@ def _rotz(deg):
     return np.array([[math.cos(a), -math.sin(a), 0], [math.sin(a), math.cos(a), 0], [0, 0, 1]])
 
 
-def slot_pose(p: BrickParams, fp: FixtureParams, index, orientation):
-    """Seated brick pose (mm, wxyz) in slot ``index``; the slot frame turns with the orientation."""
+def slot_part(kind):
+    return kind[0]
+
+
+def slot_pose(p: BrickParams, fp: FixtureParams, index, kind):
+    """Seated brick pose (mm, wxyz) in slot ``index``; a turned ('r') slot frame is yawed 180 degrees."""
     centre = np.asarray(fp.origin, float) + np.array([index*fp.pitch, 0., 0.])
-    yaw = 0. if orientation == 'A' else 180.
+    yaw = 180. if kind.endswith('r') else 0.
     quat = np.array([math.cos(math.radians(yaw)/2), 0, 0, math.sin(math.radians(yaw)/2)])
     return centre, quat, yaw
 
@@ -87,25 +92,22 @@ def funnel_pieces(p: BrickParams, fp: FixtureParams, channels):
     return pieces
 
 
-def build_fixture(p: BrickParams, fp: FixtureParams, orientations, channels=None):
-    """Bundle: slots [{index, orientation, pos, quat}], static collision pieces (world mm), stand.
+def build_fixture(p: BrickParams, fp: FixtureParams, kinds, channels=None):
+    """Bundle: slots [{index, kind, part, pos, quat}], static collision pieces (world mm), stand.
 
-    ``orientations`` lists 'A'/'B' per slot. The brick origin of slot i is at its pos;
-    Placement(0, 0) puts the brick centre at x = U over the base, so the base is shifted -U.
+    ``kinds`` lists the slot kind per slot ('A', 'B', 'Ar', 'Br'). The brick origin of slot i
+    is at its pos; Placement(0, 0) puts the brick centre at x = U over the base, so the base is
+    shifted -U.
     """
-    if p.lean_mode == 'ab':
-        raise NotImplementedError("Fixture slots for 'ab' lean mode parts are not built yet")
-    base = cad.build_base(p, SLOT_BASE[1] - SLOT_BASE[0])
-    seat, _ = L.pose(p, L.Placement(0, 0))
-    outer = slot_outer(p, fp)
-    local = cad._pieces(outer, p)
     guides = funnel_pieces(p, fp, channels) if fp.funnel and channels else []
+    outers = {k: slot_outer(p, fp, k) for k in sorted({slot_part(k) for k in kinds})}
+    local = {k: cad._pieces(o, p) for k, o in outers.items()}
     slots, pieces = [], []
-    for i, o in enumerate(orientations):
-        pos, quat, yaw = slot_pose(p, fp, i, o)
+    for i, kind in enumerate(kinds):
+        pos, quat, yaw = slot_pose(p, fp, i, kind)
         R = _rotz(yaw)
-        slots.append({'index': i, 'orientation': o, 'pos': pos.tolist(), 'quat': quat.tolist()})
-        pieces += [piece @ R.T + pos for piece in local + guides]
+        slots.append({'index': i, 'kind': kind, 'part': slot_part(kind), 'pos': pos.tolist(), 'quat': quat.tolist()})
+        pieces += [piece @ R.T + pos for piece in local[slot_part(kind)] + guides]
     stand = []
     sx, sy = fp.stand_xy
     for side in (-1, 1):
@@ -114,11 +116,11 @@ def build_fixture(p: BrickParams, fp: FixtureParams, orientations, channels=None
         hi = np.array([x + 6, sy + 60, fp.stand_z])
         stand.append(cad_box(lo, hi))
     return {'params': fp.to_dict(), 'slots': slots, 'collision': pieces, 'stand': stand,
-            'base_outer': outer, 'local': local, 'guides': guides}
+            'base_outer': outers, 'local': [q for k in local.values() for q in k], 'guides': guides}
 
 
-def slot_outer(p: BrickParams, fp: FixtureParams):
-    """Slot base profile in the slot frame (seated brick origin at 0), mm.
+def slot_outer(p: BrickParams, fp: FixtureParams, part='A'):
+    """Slot base profile for an unrotated ``part`` in the slot frame (seated brick origin at 0), mm.
 
     Hooked: the anchored course-0 base. Unhooked: the same sawtooth, with each tooth's
     vertical sweep pocketed out so the brick is located (sawtooth in x, gutter in y) but lifts
@@ -128,12 +130,12 @@ def slot_outer(p: BrickParams, fp: FixtureParams):
     from shapely.ops import unary_union
     from . import profile as pr
     thickness = p.tooth_L + p.slot_extra + 4
-    outer, _ = pr.base_outer(p, SLOT_BASE[1] - SLOT_BASE[0], thickness)
+    outer, _ = pr.base_outer(p, SLOT_BASE[1] - SLOT_BASE[0], thickness, part=part)
     seat, _ = L.pose(p, L.Placement(0, 0))
     outer = affinity.translate(outer, SLOT_BASE[0]*p.U - seat[0], 0)
     if fp.hooked:
         return outer
-    teeth = pr.brick_parts(p, 'A')['teeth']
+    teeth = pr.brick_parts(p, part)['teeth']
     rise = p.tooth_L + p.slot_extra + 3
     sweep = unary_union([affinity.translate(t, 0, dz) for t in teeth for dz in np.linspace(0, rise, 16)])
     pocket = sweep.convex_hull if len(teeth) == 1 else unary_union(
@@ -178,13 +180,14 @@ def export(p: BrickParams, fixture, out):
     out.mkdir(parents=True, exist_ok=True)
     thickness = p.tooth_L + p.slot_extra + 4
     drop = pr.shear_drop(p) if p.gutter > 0 else 0.
-    outer, _ = pr.base_outer(p, SLOT_BASE[1] - SLOT_BASE[0], thickness + drop + 1.)
-    strip = cad._swept(outer, [], p)
     seat, _ = L.pose(p, L.Placement(0, 0))
-    strip = strip.translate(cq.Vector(SLOT_BASE[0]*p.U - seat[0], 0, 0))
+    strips = {}
+    for part in sorted({s['part'] for s in fixture['slots']}):
+        outer, _ = pr.base_outer(p, SLOT_BASE[1] - SLOT_BASE[0], thickness + drop + 1., part=part)
+        strips[part] = cad._swept(outer, [], p).translate(cq.Vector(SLOT_BASE[0]*p.U - seat[0], 0, 0))
     shape = None
     for s in fixture['slots']:
-        piece = strip.rotate(cq.Vector(0, 0, 0), cq.Vector(0, 0, 1), 0 if s['orientation'] == 'A' else 180)
+        piece = strips[s['part']].rotate(cq.Vector(0, 0, 0), cq.Vector(0, 0, 1), 180 if s['kind'].endswith('r') else 0)
         piece = piece.translate(cq.Vector(*s['pos']))
         shape = piece if shape is None else shape.fuse(piece)
     xs = [s['pos'][0] for s in fixture['slots']]
