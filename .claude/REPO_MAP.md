@@ -7,6 +7,7 @@ Keep this file current: when you add, remove, rename, or change the role of a mo
 - `flight/` cflib flight program and Experiment 2 calibration (`fly`, `flight-cal`).
 - `stl_exports/` CAD meshes (`2p5d_ab/`, `2p5d_ring/`, fork gripper) and `export_2p5d.py`.
 - `.github/` CI (`workflows/tests.yml`: `flight` and `brixzle` jobs) and Dependabot.
+- `.claude/` this map and project skills (`skills/pick-up-issue`, `skills/grill-me`); root `CLAUDE.md`, `CONTRIBUTING.md`, `README.md` hold the rules and overview.
 - Git-ignored, local only: `runs/`, `assets/`, `.cache/`, weights, videos.
 
 ## brixzle/src/brixzle (CLI: `brixzle`, entry `cli.py`)
