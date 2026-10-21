@@ -19,3 +19,7 @@ assets/
 
 third_party/
 .venv-crazyflow/
+# OS and simulator droppings, generated result directories.
+.DS_Store
+MUJOCO_LOG.TXT
+results_*/

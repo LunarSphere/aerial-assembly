@@ -1,52 +1,69 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code in this research repo. Humans: see `CONTRIBUTING.md`.
 
 ## Layout
 
-Two independent Python projects, each with its own environment. Run commands from the directory noted.
+Two independent Python projects, each with its own uv environment.
 
 | Dir | Package / CLI | Toolchain |
 |---|---|---|
-| `brixzle/` | `brixzle` / `brixzle` | uv, Python 3.12 (CadQuery), MuJoCo drop trials and NSGA-III brick search; depends on `../flight` as an editable path dependency |
+| `brixzle/` | `brixzle` / `brixzle` | uv, Python 3.12 (CadQuery), MuJoCo drop trials, NSGA-III brick search, simulated drone; depends on `../flight` (editable) |
 | `flight/` | `flight` / `fly`, `flight-cal` | uv, cflib 0.1.33; real Crazyflie or simulator |
 
-Other dirs: `stl_exports/` (CAD meshes, incl. `2p5d_ab/` and the fork gripper). `runs/`, `assets/`, `.cache/`, model weights (`*.onnx`, `*.pt`), videos are git-ignored and local-only.
+`stl_exports/` holds CAD meshes. `runs/`, `assets/`, `.cache/`, weights and videos are git-ignored. `.claude/REPO_MAP.md` maps the modules: update it in the same change when you add, remove, rename or repurpose one.
 
 ## Commands
 
-**brixzle/**
 ```bash
-uv sync --all-extras
-uv run pytest
+cd brixzle && uv sync --all-extras && uv run pytest      # about 80 s
 uv run brixzle export --params configs/v0.json --out runs/v0
-uv run brixzle fly-assemble tower --bricks 1 --out runs/plan-single   # compiles plan.json for flight/
+uv run brixzle fly-assemble tower --bricks 1 --out runs/plan-single
+
+# flight/: run from the repo root so runs/ resolves
+uv run --project flight --extra test pytest flight/tests -q   # about 2 s, mocks cflib
+uv run --project brixzle fly runs/plan-single/plan.json --sim
 ```
 
-**flight/** (run from the repo root so `runs/` paths resolve)
-```bash
-uv run --project flight --extra test pytest flight/tests -q
-uv run --project flight --extra test pytest flight/tests/test_calibration.py -k name
-uv run --project flight --extra vision --extra realsense --extra detector flight-cal <setup|hover-check|tag-visit|camera|lighthouse|...> --out runs/<new-dir>
-uv run --project brixzle fly runs/plan-single/plan.json --sim      # earlier plan.json mission; --sim needs brixzle's env
-```
-Tests mock cflib; they never open a radio.
+CI (`.github/workflows/tests.yml`) runs both pytest jobs on every PR and on `master`.
 
-## Architecture
+## Workflow
 
-- **Mission vs. hardware (`flight/flight/`)**: `mission.py` talks only to the cflib API, an injected clock, and a camera pose source, so one `plan.json` flies in MuJoCo (`--sim` lazily imports `brixzle`) or on a real Crazyflie. `fake.py` records cflib calls for dry runs; `checks.py` (offline geofence/speed/accel checks) and `preflight.py` (live deck/battery/Kalman checks) gate real flights. `poly7.py` mirrors firmware trajectory pieces. This is the *earlier* mission; documented at the end of `flight/README.md`.
-- **Calibration pipeline (`flight/flight/calibration/`)**: Lighthouse geometry → overhead D455 camera registered to the Lighthouse frame via fixed AprilTags (`registration.py`, `camera.py`, `layout.py`) → flight routes: `hover.py` (hover-check), `visits.py` (tag-visit). `cli.py` is the `flight-cal` entry point; setup output (`runs/setup`) is reused by later commands. Docs: `flight/README.md`.
-- **Safety model of `flight-cal` flights**: default is a dry-run route preview (`route.json`, `route-preview.png`); `--check-only` runs camera/radio preflight without arming; only `--arm` flies. `--demo` refreshes the camera pose from fixed tags and uses PID with relaxed tolerances. Every run needs a new `--out` directory.
+1. Find the GitHub issue (`gh issue view N`). No issue, no branch: ask for one or offer to draft it.
+2. Branch from an up-to-date `master` as `<issue#>-short-name`. One issue, one branch, one PR.
+3. TDD: write a failing test, run it and see it fail, then make it pass. New behaviour needs a new test.
+4. Run the affected project's tests; they must pass before the PR.
+5. Open a PR whose body says `Closes #N`, lists the tests run, and cites evidence for any result. Another collaborator reviews and merges; never merge your own PR.
+
+`/pick-up-issue N` runs steps 1–5. `/grill-me` stress-tests an open-ended design issue before any code.
+
+## Hardware safety
+
+- Never arm the drone, open a radio link, or run anything with `--arm` (`fly`, `flight-cal`). Only a human flies.
+- Allowed: tests, `--sim`, dry runs (the default) and offline checks. Ask before `--check-only`, since it opens the camera and radio.
+- If a task needs a real flight, stop and hand the human the exact command.
+
+## Reporting results (anti-hallucination)
+
+- Simulated results are not hardware rates. Label them "simulated, uncalibrated contact".
+- Never state a number, success rate or timing without a source to cite: a run directory, seed and config, a test, or a `STATUS.md` line.
+- Say when a result was not produced in this session ("from `STATUS.md`, not re-run").
+- If you did not run it, do not say it passed. Report failing tests with their output.
+- Don't invent datasheet values or cflib/crazyflow APIs. Read `third_party/`, the installed package source, or the docs, and say when a value is a guess.
 
 ## Conventions
 
-- SI units; quaternions are `[w, x, y, z]` everywhere. Convert to scipy/crazyflow's scalar-last order only via `flight/flight/frames.py` (`wxyz_to_xyzw`).
-- Four-space indent, `snake_case`, dataclasses for settings, explicit input validation, finite JSON. No formatter or linter configured.
+- SI units. Quaternions are `[w, x, y, z]` everywhere; convert to scalar-last only via `flight/flight/frames.py` (`wxyz_to_xyzw`).
+- Every experiment writes to a new output directory (`--out runs/<new-dir>`); never overwrite an earlier run.
+- When an Experiment 2 decision changes (thrust, sensing, gripper, controller, fixture), update the decision table in `brixzle/docs/exp2/STATUS.md` in the same PR.
+- Four-space indent, `snake_case`, `PascalCase` classes, dataclasses for settings, explicit input validation, finite JSON. No formatter or linter; match the surrounding code.
+- Physics changes: check determinism and invalid states, and keep synthetic smoke tests separate from validated CAD results.
+- Commits: short imperative subject, one coherent change.
 
-## Repo map
+## Architecture
 
-`.claude/REPO_MAP.md` maps the modules. When you add, remove, rename, or change the role of a module or directory, update it in the same change.
+- **Mission vs. hardware (`flight/flight/`)**: `mission.py` talks only to the cflib API, an injected clock and a pose source, so one `plan.json` flies in MuJoCo (`--sim` lazily imports `brixzle`) or on a real Crazyflie. `fake.py` records cflib calls for dry runs; `checks.py` (offline) and `preflight.py` (live) gate real flights.
+- **Calibration (`flight/flight/calibration/`)**: Lighthouse geometry → overhead D455 registered to the Lighthouse frame via fixed AprilTags → `hover.py` (hover-check) and `visits.py` (tag-visit). `flight-cal` defaults to a dry-run route preview; `--check-only` runs preflight without arming; only `--arm` flies.
+- **brixzle**: `params.py` → `profile.py`/`cad.py` geometry → `scene.py`/`trials.py` MuJoCo trials → `optimize.py` NSGA-III. `drone.py`, `cf/` and `simcf.py` simulate the Crazyflie for `fly-assemble`.
 
-## CI
-
-`.github/workflows/tests.yml` runs the `flight` and `brixzle` pytest jobs on PRs and pushes to `master`. Dependabot (`.github/dependabot.yml`) bumps uv and GitHub Actions weekly; major version bumps are ignored (bump those by hand), and `dependabot-automerge.yml` auto-merges the minor/patch ones once checks pass.
+Dependabot bumps uv and Actions weekly; minor and patch bumps auto-merge once checks pass.
