@@ -16,7 +16,6 @@
   "end_gap": 0.3,
   "wall": 1.2,
   "lighten": true,
-  "lean_mode": "ab",
   "fork_d": 2.0,
   "fork_clearance": 0.3,
   "infill": 1.0,

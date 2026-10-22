@@ -7,7 +7,7 @@ from shapely import affinity
 from brixzle import cad, optimize as O, profile as pr
 from brixzle.params import V0
 
-AB = replace(V0, lean_mode='ab', clearance=0.05)
+AB = replace(V0, clearance=0.05)
 CONCEPTS = {
     'lip': dict(lip_L=5., lip_w=4.),
     'barb': dict(barb_h=0.4),

@@ -1,30 +1,30 @@
-"""3D structures from the 2.5D bricks: walls along X and Y joined by turn pieces.
+"""3D structures from the A/B bricks: walls along X and Y joined by turn pieces.
 
-Everything is built from *cells*: one voxel of the A-brick profile (top T with
-a slot, bottom T' with a tooth), swept through the depth with the Y gutter.
-A cell is placed with a yaw in quarter turns. The straight 2.5D brick is two
-cells; a Y-running wall is the same brick rotated 90 degrees. A cell nests on
-the cell below exactly when its yaw differs by 180 degrees (the A/B rule), so
-every cell column alternates yaw by 180 per course.
+Everything is built from *cells*: one voxel of the A or B part profile (``profile.brick_parts``)
+swept through the depth with the Y gutter. A cell is placed with a yaw in quarter turns. The
+straight 2.5D brick is two cells; a Y-running wall is the same brick rotated 90 degrees. Courses
+alternate parts (A even, B odd) exactly as in the 2.5D lattice, so a cell nests on the cell
+below when it has the *same* yaw and the other part: every cell column keeps one yaw.
 
-Parts (all "A-like" in their own frame, with teeth stroking toward local +x):
+A/B teeth trail toward local -x, so every brick seats with a stroke along local -x, the same
+way round the ring on every course.
+
+Parts (built in both A and B variants, named e.g. ``L3A``):
   S2  the straight 2.5D brick (cad.build_brick).
-  L3  turn: corner + 1 cell along local +x + 1 cell along local +y. Teeth only
-      on the corner and x-arm cells: a rigid brick seats along one stroke, so
-      teeth leaning along x and along y would fight. The y-arm cell has yaw
-      270 (its profile runs along the wall it belongs to) and nests by keel
-      and gutter only.
-  I3  three straight cells extending along local -x; used at corners on odd
-      courses so the corner alternates between the two walls (masonry corner
-      bond) and straights shift one cell per course (running bond).
-  K2  closer: a straight whose upstream end is cut back by the stroke's
-      sideways travel. On odd courses every stroke points back into its
-      neighbour all the way round the closed ring, so some brick must go in
-      last next to an already placed upstream neighbour; masonry calls it the
-      closer.
+  L3  turn, even courses: corner + 1 cell along local +x + 1 cell along local +y. Teeth only
+      on the corner and x-arm cells: a rigid brick seats along one stroke, so teeth leaning
+      along x and along y would fight. The y-arm cell has yaw 270 (its profile runs along the
+      wall it belongs to) and nests by keel and gutter only.
+  I3  three straight cells along local +x that own the corner on odd courses, so the corner
+      alternates between the two walls (masonry corner bond) and straights shift one cell per
+      course (running bond).
+  K2  closer: a straight whose upstream (+x) end is cut back by the stroke's sideways travel.
+      Every stroke points back into its neighbour all the way round the closed ring, so on
+      every course some brick must go in last next to an already placed upstream neighbour;
+      masonry calls it the closer.
 
-The ring has n x n cells (n even, >= 6). Even course: L3 at each corner, S2
-fill. Odd course: I3 owns each corner, S2 fill shifted by one.
+The ring has n x n cells (n even, >= 6). Even course: L3 at each corner, S2 fill. Odd course:
+I3 owns each corner, S2 fill shifted by one. The last straight of the last wall is the K2.
 """
 from dataclasses import dataclass
 import math
@@ -50,29 +50,31 @@ def stroke_travel(p: BrickParams):
     return (p.tooth_L + p.slot_extra)*math.cos(math.radians(p.phi))
 
 
-def cell_profile(p: BrickParams, teeth=True, trim_lo=False, trim_hi=False, lighten=True, extra_lo=0.):
-    """One A-brick voxel, centred on x = 0: (outer polygon, holes)."""
+def cell_profile(p: BrickParams, part='A', teeth=True, trim_lo=False, trim_hi=False, lighten=True, extra_hi=0.):
+    """One voxel of ``part`` (the right voxel of the brick, x in [0, U]), centred on x = 0: (outer polygon, holes)."""
+    from shapely import affinity
     U = p.U
-    x0 = (p.end_gap/2 if trim_lo else 0.) + extra_lo
-    x1 = U - p.end_gap/2 if trim_hi else U
-    body = pr._strip(p, x0, x1, top_mirrored=False, bottom_mirrored=True, bottom_offset=0.)
+    top_m, bottom_m, top_rev, bottom_rev = pr.PART_FLAGS[part]
+    x0 = p.end_gap/2 if trim_lo else 0.
+    x1 = (U - p.end_gap/2 if trim_hi else U) - extra_hi
+    body = pr._strip(p, x0, x1, top_mirrored=top_m, bottom_mirrored=bottom_m, bottom_offset=0.)
     feats = [body]
     if teeth:
-        feats.append(pr.tooth(p, np.array([U - p.valley_u, 0.]), mirrored=True))
-    outer = unary_union(feats).difference(pr.slot(p, np.array([p.valley_u, p.H0]), mirrored=False))
+        keel = U - p.valley_u if bottom_m else p.valley_u
+        feats.append(pr.tooth(p, np.array([keel, 0.]), mirrored=bottom_m, reversed=bottom_rev))
+    valley = U - p.valley_u if top_m else p.valley_u
+    outer = unary_union(feats).difference(pr.slot(p, np.array([valley, p.H0]), mirrored=top_m, reversed=top_rev))
     outer = pr._largest(outer.buffer(-0.01, join_style=2).buffer(0.01, join_style=2))
     holes = []
     if lighten:
-        parts = pr.brick_parts(p)
+        parts = pr.brick_parts(p, part)
         voxel = box(0., outer.bounds[1] - 1, U, outer.bounds[3] + 1)
-        from shapely import affinity
-        for h in pr.lightening_holes(p, parts, pr.fork_channels(p, parts)):
-            # The A brick's right voxel spans x in [0, U]: same profile as this cell.
+        for h in pr.lightening_holes(p, parts, pr.fork_channels(p)):
+            # The brick's right voxel spans x in [0, U]: same profile as this cell.
             g = h.intersection(voxel).intersection(outer.buffer(-p.wall))
             for q in ([g] if g.geom_type == 'Polygon' else getattr(g, 'geoms', [])):
                 if q.geom_type == 'Polygon' and q.area > 6.:
                     holes.append(q)
-    from shapely import affinity
     shift = lambda g: affinity.translate(g, -U/2, 0.)
     return shift(outer), [shift(h) for h in holes]
 
@@ -89,7 +91,7 @@ class Cell:
     yaw: int        # quarter turns of the cell profile
     teeth: bool = True
     lighten: bool = True
-    extra_lo: float = 0.   # extra cut at the local -x end (closer)
+    extra_hi: float = 0.   # extra cut at the local +x (upstream) end (closer)
 
 
 def _exposed(cell, cells):
@@ -103,12 +105,12 @@ def _exposed(cell, cells):
     return out
 
 
-def build_part(p: BrickParams, cells, name):
-    """Bundle (collision pieces, mesh, mass, COM, inertia) for a multi-cell part."""
+def build_part(p: BrickParams, cells, name, part='A'):
+    """Bundle (collision pieces, mesh, mass, COM, inertia) for a multi-cell part made of ``part`` cells."""
     pieces, shape = [], None
     for c in cells:
         lo, hi = _exposed(c, cells)
-        outer, holes = cell_profile(p, c.teeth, lo, hi, c.lighten and p.lighten, c.extra_lo)
+        outer, holes = cell_profile(p, part, c.teeth, lo, hi, c.lighten and p.lighten, c.extra_hi)
         R = _yaw_matrix(c.yaw)
         t = np.array([c.i*p.U, c.j*p.U, 0.])
         for v in cad._pieces(outer, p):
@@ -127,23 +129,28 @@ def build_part(p: BrickParams, cells, name):
 
 PART_CELLS = {
     'L3': [Cell(0, 0, 0), Cell(1, 0, 0), Cell(0, 1, 3, teeth=False)],
-    'I3': [Cell(0, 0, 0), Cell(-1, 0, 0), Cell(-2, 0, 0)],
+    'I3': [Cell(0, 0, 0), Cell(1, 0, 0), Cell(2, 0, 0)],
 }
+BODIES = ('L3A', 'S2A', 'K2A', 'I3B', 'S2B', 'K2B')   # the parts ``ring`` uses
 
 
-def build_parts(p: BrickParams):
-    if p.lean_mode != 'alternate':
-        raise ValueError("Ring structures use the 'alternate' lean mode")
+def build_parts(p: BrickParams, bodies=BODIES):
+    """{body name: bundle}, e.g. 'L3A' (turn of A cells), 'S2B' (the B straight)."""
     cells = dict(PART_CELLS)
-    cells['K2'] = [Cell(0, 0, 0, extra_lo=stroke_travel(p) + 0.5), Cell(1, 0, 0)]
-    parts = {name: build_part(p, c, name) for name, c in cells.items()}
-    parts['S2'] = cad.build_brick(p)
-    parts['S2']['cells'] = [(-0.5, 0), (0.5, 0)]   # cell centres in units of U, frame at the voxel boundary
+    cells['K2'] = [Cell(0, 0, 0), Cell(1, 0, 0, extra_hi=stroke_travel(p) + 0.5)]
+    parts = {}
+    for body in bodies:
+        kind, part = body[:-1], body[-1]
+        if kind == 'S2':
+            parts[body] = cad.build_brick(p, part=part)
+            parts[body]['cells'] = [(-0.5, 0), (0.5, 0)]   # cell centres in units of U, frame at the voxel boundary
+        else:
+            parts[body] = build_part(p, cells[kind], body, part)
     return parts
 
 
 def base_cell_pieces(p: BrickParams, thickness=None):
-    """Anchored base for one cell (top matches an A cell's bottom), centred on x = 0."""
+    """Anchored base for one cell (top matches an A cell's bottom: course 0 is A), centred on x = 0."""
     thickness = thickness or p.tooth_L + p.slot_extra + 4
     outer, _ = pr.base_outer(p, 1, thickness)
     from shapely import affinity
@@ -154,11 +161,19 @@ def base_cell_pieces(p: BrickParams, thickness=None):
 
 @dataclass(frozen=True)
 class Brick:
-    kind: str       # 'S2', 'L3', 'I3'
+    kind: str       # 'S2', 'L3', 'I3', 'K2'
     course: int
     x: float        # frame position in units of U (cell centre grid; S2 sits on a cell boundary)
     y: float
     yaw: int
+
+    @property
+    def part(self):
+        return 'AB'[self.course % 2]
+
+    @property
+    def body(self):
+        return self.kind + self.part
 
     @property
     def name(self):
@@ -174,7 +189,7 @@ def cells_of(b: Brick, local_cells):
     return out
 
 
-LOCAL_CELLS = {'L3': [(0, 0), (1, 0), (0, 1)], 'I3': [(0, 0), (-1, 0), (-2, 0)], 'S2': [(-0.5, 0), (0.5, 0)],
+LOCAL_CELLS = {'L3': [(0, 0), (1, 0), (0, 1)], 'I3': [(0, 0), (1, 0), (2, 0)], 'S2': [(-0.5, 0), (0.5, 0)],
                'K2': [(0, 0), (1, 0)]}
 
 
@@ -185,12 +200,13 @@ def pose(p: BrickParams, b: Brick):
 
 
 def stroke(b: Brick):
-    """World grid direction the brick moves along while seating (local +x)."""
-    return DIRS[b.yaw % 4]
+    """World grid direction the brick moves along while seating (local -x: A/B teeth trail -x)."""
+    dx, dy = DIRS[b.yaw % 4]
+    return (-dx, -dy)
 
 
 def ring(n=6, courses=6):
-    """Square ring of n x n cells (n even >= 6). Returns (bricks, base cells with yaw)."""
+    """Square ring of n x n cells (n even >= 6), as a list of bricks."""
     if n % 2 or n < 6:
         raise ValueError('ring needs an even side of at least 6 cells')
     corners = [(0, 0), (n - 1, 0), (n - 1, n - 1), (0, n - 1)]
@@ -199,21 +215,16 @@ def ring(n=6, courses=6):
         odd = k % 2
         for r, c in enumerate(corners):
             e = np.array(DIRS[r])
-            if not odd:
-                bricks.append(Brick('L3', k, c[0], c[1], r))
-                ts = range(2, n - 2, 2)
-            else:
-                bricks.append(Brick('I3', k, c[0], c[1], (r + 2) % 4))
-                ts = range(3, n - 1, 2)
+            bricks.append(Brick('I3' if odd else 'L3', k, c[0], c[1], r))
+            ts = range(3, n - 1, 2) if odd else range(2, n - 2, 2)
             for t in ts:
-                yaw = (r + 2*odd) % 4
-                if odd and r == 3 and t == ts[-1]:
-                    # Closer: K2's frame sits on its upstream cell (local +x is the stroke).
-                    up = np.array(c) + (t + 1)*e
-                    bricks.append(Brick('K2', k, float(up[0]), float(up[1]), yaw))
+                if r == 3 and t == ts[-1]:
+                    # Closer: K2's frame sits on its first cell; its +x (upstream) end is cut back.
+                    first = np.array(c) + t*e
+                    bricks.append(Brick('K2', k, float(first[0]), float(first[1]), r))
                     continue
                 mid = np.array(c) + (t + 0.5)*e
-                bricks.append(Brick('S2', k, float(mid[0]), float(mid[1]), yaw))
+                bricks.append(Brick('S2', k, float(mid[0]), float(mid[1]), r))
     return bricks
 
 
@@ -233,7 +244,7 @@ def course0_yaws(bricks):
 
 
 def check_columns(bricks):
-    """Every cell is used once per course and every column alternates yaw by 180."""
+    """Every cell is used once per course and every column keeps its yaw (parts alternate by course)."""
     grid = {}
     for b in bricks:
         local = LOCAL_CELLS[b.kind]
@@ -245,7 +256,7 @@ def check_columns(bricks):
             grid[key] = yaw
     for (k, c), yaw in grid.items():
         below = grid.get((k - 1, c))
-        if k > 0 and (below is None or (yaw - below) % 4 != 2):
+        if k > 0 and (below is None or yaw != below):
             raise ValueError(f'cell {c} course {k}: yaw {yaw} over {below}')
     return grid
 
@@ -294,7 +305,7 @@ def _release(p, b, sample, seat=None):
     pos, quat = seat if seat is not None else pose(p, b)
     R = _rot(quat)
     lift = p.amplitude + p.tooth_L + p.slot_extra + sample['clear']
-    offset = R.apply([-sample['dx'], sample['dy'], 0.])   # aim bias upstream of the stroke
+    offset = R.apply([sample['dx'], sample['dy'], 0.])   # aim bias upstream of the stroke (local +x)
     err = Rotation.from_euler('xyz', [sample['roll'], sample['pitch'], sample['yaw']], degrees=True)
     q = (err*R).as_quat()
     return pos + offset + np.array([0, 0, lift]), np.array([q[3], q[0], q[1], q[2]])
@@ -323,7 +334,7 @@ def assemble(p: BrickParams, parts, bricks, cfg: T.TrialConfig, seed=0, stop_on_
         t = np.array([(ci + .5)*p.U, (cj + .5)*p.U, 0.])
         static += [v @ R.T + t for v in piece]
     model, xml, info = build_scene(p, parts, [], len(order), cfg.physics, visual=record is not None,
-                                   body_parts=[b.kind for b in order], static=static)
+                                   body_parts=[b.body for b in order], static=static)
     data = mujoco.MjData(model)
     owner = T._brick_geoms(model, info)
     rng = np.random.default_rng(seed)
@@ -350,7 +361,7 @@ def assemble(p: BrickParams, parts, bricks, cfg: T.TrialConfig, seed=0, stop_on_
             turn = math.degrees((_rot(before[i][1]).inv()*_rot(qi)).magnitude())
             moved = max(moved, float(np.linalg.norm(pi - before[i][0])), turn*p.U*math.pi/180)
         collapsed = moved > cfg.tolerance.drift or m['floor']
-        stages.append({'brick': b.name, 'kind': b.kind, **m, 'outcome': outcome, 'err_mm': err.tolist(),
+        stages.append({'brick': b.name, 'kind': b.body, **m, 'outcome': outcome, 'err_mm': err.tolist(),
                        'angle_deg': angle, 'stage_motion_mm': moved, 'collapsed': bool(collapsed)})
         for c in cells:
             where[(b.course, c)] = j

@@ -49,19 +49,6 @@ def test_fork_bores_straddle_com_above_it(brick):
     assert all(c[1] > brick['com'][2] for c in brick['channels'])
 
 
-@pytest.mark.parametrize('mode', ['alternate', 'uniform'])
-def test_courses_nest_without_overlap(mode):
-    p = replace(V0, lean_mode=mode)
-    outer = pr.brick_parts(p)['outer']
-    lower = L.footprint(p, outer, L.Placement(0, 0))
-    upper = L.footprint(p, outer, L.Placement(1, 1))
-    base, _ = pr.base_outer(p, 4, 12)
-    assert lower.intersection(upper).area < 0.5
-    assert lower.intersection(base).area < 0.5
-    # They touch: nesting is a contact, not a gap.
-    assert lower.distance(upper) < 0.05 and lower.distance(base) < 0.05
-
-
 def test_rules_flag_shallow_ramp():
     p = replace(V0, theta=20.)
     margins = R.rules(p, cad.build_brick(p, solid=False))

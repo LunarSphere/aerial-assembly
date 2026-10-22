@@ -12,13 +12,13 @@ Keep this file current: when you add, remove, rename, or change the role of a mo
 
 ## brixzle/src/brixzle (CLI: `brixzle`, entry `cli.py`)
 Geometry and design
-- `params.py` brick parameters, V0 guess, optimizer bounds
-- `profile.py` 2D XZ brick/base profile (shapely); `convex.py` convex decomposition
+- `params.py` brick parameters, V0 (the A/B pair, the only design), optimizer bounds
+- `profile.py` 2D XZ profile of parts A and B, shared tine bores, base (shapely); `convex.py` convex decomposition
 - `cad.py` CadQuery solid, exports, mass, collision pieces; `baseplate.py` anchored base
 - `gripper.py` passive grippers; `rules.py` analytic design rules
-- `lattice.py` voxel lattice, placements, assembly order; `structures.py` trial structures; `ring.py` 3D wall/turn structures
+- `lattice.py` voxel lattice, placements, assembly order; `structures.py` trial structures; `ring.py` 3D ring of A/B cells (L3/I3 turns, K2 closers)
 Simulation
-- `scene.py` MJCF scene; `trials.py` drop, sequential assembly, push trials; `fixture.py` pick fixture
+- `scene.py` MJCF scene; `trials.py` drop, sequential assembly, push trials; `fixture.py` pick fixture (slot kinds A, B, turned Ar/Br)
 - `drone.py`, `drone_params.py` simulated Crazyflie 2.1 Brushless and thrust budget
 - `cf/` numpy port of crazyflow Mellinger controller and dynamics (`mellinger.py`, `dynamics.py`, `params.py`, `rot.py`, `meshes/`)
 - `simcf.py` simulated cflib API; `estimator.py` Lighthouse state model

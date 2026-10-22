@@ -17,7 +17,7 @@ Two independent Python projects, each with its own uv environment.
 
 ```bash
 cd brixzle && uv sync --all-extras && uv run pytest      # about 80 s
-uv run brixzle export --params configs/v0.json --out runs/v0
+uv run brixzle export --params configs/ab.json --out runs/v0
 uv run brixzle fly-assemble tower --bricks 1 --out runs/plan-single
 
 # flight/: run from the repo root so runs/ resolves

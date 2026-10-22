@@ -31,7 +31,6 @@
       "fork_clearance": 0.3,
       "infill": 1.0
     },
-    "lean_mode": "ab",
     "bounds": {
       "clearance": [
         0.03,
