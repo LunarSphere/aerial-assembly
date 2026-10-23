@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "kind": "approach-accuracy",
+  "accepted": true,
+  "created_utc": "2026-10-22T21:27:51.700684+00:00",
+  "rig_fingerprint": "2f3b21636bb34275417c1f5a7fab83b45f864097961bf4c4fe8a7ed283c45879",
+  "demo": true,
+  "visual_position_advisory": true,
+  "controller": "pid",
+  "flight_battery_policy": {
+    "low_v": 3.35,
+    "critical_v": 3.1,
+    "low_duration_s": 1.0
+  },
+  "camera_reprojection_rms_px": 1.2845591924285,
+  "camera_reprojection_limit_px": 3.0,
+  "camera_observation_max_age_s": 1.0,
+  "geometry_uploaded": true,
+  "geometry_readback_verified": true,
+  "lighthouse_upload": {
+    "supported_station_slots": 4,
+    "written_station_ids": [
+      0,
+      1
+    ],
+    "persisted": true,
+    "readback_verified": true
+  },
+  "preflight": {
+    "position_m": [
+      0.005944355876999907,
+      -0.008101965417154133,
+      -0.0007569724519271403
+    ],
+    "vbat_V": 3.816422462463379,
+    "controller": 1
+  },
+  "flight_complete": true,
+  "operator_observation": "yes",
+  "independent_drone_pose_measured": false
+}

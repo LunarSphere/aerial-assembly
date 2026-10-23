@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "kind": "approach-accuracy",
+  "accepted": true,
+  "created_utc": "2026-10-23T00:35:24.932548+00:00",
+  "rig_fingerprint": "14225fa92e7d04cadc915526b4264bc56b7a1595b31471f95b25f71150d8b315",
+  "demo": true,
+  "visual_position_advisory": true,
+  "controller": "pid",
+  "flight_battery_policy": {
+    "low_v": 3.35,
+    "critical_v": 3.1,
+    "low_duration_s": 1.0
+  },
+  "camera_reprojection_rms_px": 1.212935735357077,
+  "camera_reprojection_limit_px": 3.0,
+  "camera_observation_max_age_s": 1.0,
+  "geometry_uploaded": true,
+  "geometry_readback_verified": true,
+  "lighthouse_upload": {
+    "supported_station_slots": 4,
+    "written_station_ids": [
+      0,
+      1
+    ],
+    "persisted": true,
+    "readback_verified": true
+  },
+  "station_consistency": {
+    "position_m": [
+      0.005552808903361316,
+      -0.003910697782458209,
+      0.0012405960160241313
+    ],
+    "stations": {
+      "0": {
+        "rms_mrad": 0.275053133403731,
+        "rms_at_deck_mm": 0.45979245133270796,
+        "distance_m": 1.6716495669140812
+      },
+      "1": {
+        "rms_mrad": 0.4446844619760577,
+        "rms_at_deck_mm": 1.0459599506919153,
+        "distance_m": 2.3521396408679354
+      }
+    },
+    "worst_station": "1",
+    "worst_rms_mrad": 0.4446844619760577,
+    "limit_mrad": 1.5,
+    "consistent": true,
+    "pad_offset_m": 0.006904080122503446
+  },
+  "preflight": {
+    "position_m": [
+      0.005487229628488422,
+      -0.004411512683145702,
+      0.0017962821410037577
+    ],
+    "vbat_V": 4.006451606750488,
+    "controller": 1
+  },
+  "flight_complete": true,
+  "operator_observation": "yes",
+  "independent_drone_pose_measured": false
+}
