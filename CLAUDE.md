@@ -33,7 +33,7 @@ CI (`.github/workflows/tests.yml`) runs both pytest jobs on every PR and on `mas
 2. Branch from an up-to-date `master` as `<issue#>-short-name`. One issue, one branch, one PR.
 3. TDD: write a failing test, run it and see it fail, then make it pass. New behaviour needs a new test.
 4. Run the affected project's tests; they must pass before the PR.
-5. Open a PR whose body says `Closes #N`, lists the tests run, and cites evidence for any result. Another collaborator reviews and merges; never merge your own PR.
+5. Open a PR whose body says `Closes #N`, lists the tests run, and cites evidence for any result. The maintainer reviews every PR; merge only when they ask, once CI is green.
 
 `/pick-up-issue N` runs steps 1–5. `/grill-me` stress-tests an open-ended design issue before any code.
 
