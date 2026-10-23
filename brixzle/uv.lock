@@ -389,6 +389,7 @@ requires-dist = [
     { name = "pyrealsense2", marker = "extra == 'realsense'", specifier = ">=2.56,<3" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8,<10" },
     { name = "scipy", specifier = ">=1.14,<2" },
+    { name = "timm", marker = "extra == 'yolo'", specifier = ">=1.0,<2" },
     { name = "ultralytics", marker = "python_full_version >= '3.11' and extra == 'yolo'", specifier = "==8.4.178" },
 ]
 provides-extras = ["vision", "realsense", "detector", "yolo", "plot", "test"]

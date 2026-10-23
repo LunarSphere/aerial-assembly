@@ -1,9 +1,10 @@
 """Exp 3 follow-up (issue #26): SAM mask centroids of the drone in the saved hover frames.
 
     uv run --project flight --extra vision --extra yolo python figures/exp3-approach-accuracy/segment_frames.py runs/exp3-s2
+    ... segment_frames.py runs/exp3-s2 --model runs/models/sam3.pt   # gated: hf download facebook/sam3 sam3.pt
 
-Writes data/trial-NN/masks.json (one centroid per saved image) and mask-examples.png; make_figures.py
-reads the centroids. The frames themselves stay in runs/ (git-ignored). They have the YOLOE box drawn
+Writes data/trial-NN/masks-<model>.json (one centroid per saved image) and mask-examples-<model>.png;
+make_figures.py compares every mask set it finds. The frames themselves stay in runs/ (git-ignored). They have the YOLOE box drawn
 on them (#29), and SAM segments that rectangle, so the exact drawn pixels are inpainted first.
 """
 import argparse
@@ -15,7 +16,6 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 DATA = HERE/'data'
-MODEL = 'sam2.1_b.pt'
 
 
 def drawn_box(shape, bbox):
@@ -49,7 +49,7 @@ def tile(image, mask, bbox, centroid, pad=30, size=140):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('session', type=Path, help='the approach-accuracy session directory in runs/')
-    parser.add_argument('--model', type=Path, default=Path('runs/models')/MODEL)
+    parser.add_argument('--model', type=Path, default=Path('runs/models/sam2.1_b.pt'))
     args = parser.parse_args()
     from ultralytics import SAM
     model = SAM(str(args.model))
@@ -70,12 +70,12 @@ def main():
             masks[name] = dict(row, box_centre_px=drone['center_px'])
             if len(tiles) < 24 and len(masks) % 10 == 1:
                 tiles.append(tile(clean, mask, drone['bbox_xyxy'], row['centroid_px']))
-        out = dict(version=1, kind='drone-mask-centroids', model=MODEL, prompt='YOLOE box, drawn box inpainted',
+        out = dict(version=1, kind='drone-mask-centroids', model=args.model.name, prompt='YOLOE box, drawn box inpainted',
                    source=str(folder), frames=masks)
-        (DATA/trial['dir']/'masks.json').write_text(json.dumps(out, indent=1)+'\n')
+        (DATA/trial['dir']/f'masks-{args.model.stem}.json').write_text(json.dumps(out, indent=1)+'\n')
         print(f'{trial["dir"]}: {len(masks)} frames')
     rows = [np.hstack(tiles[i:i+8]) for i in range(0, len(tiles)-len(tiles) % 8, 8)]
-    cv2.imwrite(str(HERE/'mask-examples.png'), np.vstack(rows))
+    cv2.imwrite(str(HERE/f'mask-examples-{args.model.stem}.png'), np.vstack(rows))
 
 
 if __name__ == '__main__':

@@ -5,8 +5,8 @@
     # any time: rebuild the tables and figures from data/
     uv run --project flight --extra plot python figures/exp3-approach-accuracy/make_figures.py
 
-With data/trial-NN/masks.json from segment_frames.py (#26), it also compares the box centre with the
-SAM mask centroid on the same saved frames (methods.csv, positioning-methods.png).
+With data/trial-NN/masks-<model>.json from segment_frames.py (#26), it also compares the box centre
+with each model's mask centroid on the same saved frames (methods.csv, positioning-methods.png).
 
 Errors are computed with the same functions as `flight-cal approach-metrics`
 (flight/flight/calibration/accuracy.py), from the raw event logs.
@@ -26,7 +26,9 @@ HERE = Path(__file__).resolve().parent
 DATA = HERE/'data'
 CALIBRATION_COLOURS = {1: '#2a78d6', 2: '#eb6834'}
 CALIBRATION_MARKERS = {1: 'o', 2: '^'}
-METHOD_COLOURS = {'box': '#52514e', 'mask': '#7a3fc4'}
+METHOD_COLOURS = {'box': '#52514e', 'sam2.1_b': '#7a3fc4', 'sam3': '#1a8a7a'}
+METHOD_MARKERS = {'sam2.1_b': 'o', 'sam3': 's'}
+METHOD_LABELS = {'sam2.1_b': 'SAM 2.1', 'sam3': 'SAM 3'}
 INK, MUTED, GRID, SURFACE = '#0b0b0b', '#52514e', '#e8e7e3', '#fcfcfb'
 
 
@@ -65,34 +67,41 @@ def load():
             centres = accuracy.centres(surveys[calibration])
             for row in accuracy.approaches(events, centres, trial['index']):
                 approaches.append(dict(row, calibration=calibration))
-            if (folder/'masks.json').exists():
-                masks = json.loads((folder/'masks.json').read_text())['frames']
-                centroids = {name: m['centroid_px'] for name, m in masks.items()}
-                intrinsics = surveys[calibration]['intrinsics']
-                for method, shift in (('box', False), ('mask', True)):
+            intrinsics = surveys[calibration]['intrinsics']
+            for path in sorted(folder.glob('masks-*.json')):
+                centroids = {name: m['centroid_px'] for name, m in json.loads(path.read_text())['frames'].items()}
+                runs = [(path.stem[len('masks-'):], True)]
+                if not any(m['method'] == 'box' and m['trial'] == trial['index'] for m in methods):
+                    runs.insert(0, ('box', False))  # every model segments the same saved frames
+                for method, shift in runs:
                     for row in accuracy.approaches(accuracy.recentre(events, centroids, intrinsics, shift),
                                                    centres, trial['index']):
                         methods.append(dict(row, calibration=calibration, method=method))
     return session, approaches, trials, methods
 
 
+def mask_models(methods):
+    return sorted({m['method'] for m in methods} - {'box'})
+
+
 def method_rows(approaches, methods):
     """One row per approach: positioning error from the box centre (all frames, and the saved frames only)
-    and from the mask centroid on those same saved frames."""
+    and from each model's mask centroid on those same saved frames."""
     key = lambda r: (r['trial'], r['tag_id'])
-    by = {m: {key(r): r for r in methods if r['method'] == m} for m in ('box', 'mask')}
+    by = {m: {key(r): r for r in methods if r['method'] == m} for m in ['box']+mask_models(methods)}
     rows = []
     for r in approaches:
-        box, mask = by['box'].get(key(r)), by['mask'].get(key(r))
+        box = by['box'].get(key(r))
         if not box or box['positioning_error_m'] is None:
             continue
         row = dict(trial=r['trial'], calibration=r['calibration'], tag=r['tag_id'],
                    all_frames=r['camera_frames'], saved_frames=box['camera_frames'],
-                   box_all_frames_cm=r['positioning_error_m']*100, box_cm=box['positioning_error_m']*100,
-                   mask_cm=mask['positioning_error_m']*100)
-        shift = np.subtract(mask['camera_xy_m'], box['camera_xy_m'])*100
-        row.update(mask_minus_box_dx_cm=shift[0], mask_minus_box_dy_cm=shift[1],
-                   mask_minus_box_cm=float(np.linalg.norm(shift)))
+                   box_all_frames_cm=r['positioning_error_m']*100, box_cm=box['positioning_error_m']*100)
+        for model in mask_models(methods):
+            mask = by[model][key(r)]
+            shift = np.subtract(mask['camera_xy_m'], box['camera_xy_m'])*100
+            row.update({f'{model}_cm': mask['positioning_error_m']*100, f'{model}_minus_box_dx_cm': shift[0],
+                        f'{model}_minus_box_dy_cm': shift[1], f'{model}_minus_box_cm': float(np.linalg.norm(shift))})
         rows.append(row)
     return rows
 
@@ -102,7 +111,7 @@ def method_summary(rows):
                                  for c in sorted({r['calibration'] for r in rows})]
     out = []
     for label, subset in groups:
-        for column in ('box_all_frames_cm', 'box_cm', 'mask_cm', 'mask_minus_box_cm'):
+        for column in [c for c in rows[0] if c.endswith('_cm') and '_dx_' not in c and '_dy_' not in c]:
             values = np.array([r[column] for r in subset])
             out.append(dict(group=label, measure=column[:-3], n=len(values), mean_cm=float(values.mean()),
                             rmse_cm=float(np.sqrt(np.mean(values**2))), max_cm=float(values.max())))
@@ -237,12 +246,17 @@ def plot_methods(rows, path):
     figure, axis = plt.subplots(figsize=(6.4, 3.4), constrained_layout=True)
     style(axis)
     x = np.arange(len(rows))
+    models = [m for m in METHOD_LABELS if f'{m}_cm' in rows[0]]
+    offsets = dict(zip(models, np.linspace(-.12, .12, len(models))))
     for i, r in enumerate(rows):
-        axis.plot([i, i], [r['box_cm'], r['mask_cm']], color=GRID, linewidth=2, zorder=1)
+        values = [r['box_cm']]+[r[f'{m}_cm'] for m in models]
+        axis.plot([i, i], [min(values), max(values)], color=GRID, linewidth=2, zorder=1)
     axis.scatter(x, [r['box_cm'] for r in rows], s=40, facecolor=SURFACE, edgecolor=METHOD_COLOURS['box'],
                  linewidth=1.6, zorder=3, label='YOLOE box centre')
-    axis.scatter(x, [r['mask_cm'] for r in rows], s=40, color=METHOD_COLOURS['mask'], edgecolor=SURFACE,
-                 linewidth=1.2, zorder=3, label='SAM mask centroid')
+    for model in models:
+        axis.scatter(x+offsets[model], [r[f'{model}_cm'] for r in rows], s=34, marker=METHOD_MARKERS[model],
+                     color=METHOD_COLOURS[model], edgecolor=SURFACE, linewidth=1.2, zorder=3,
+                     label=f'{METHOD_LABELS[model]} mask centroid')
     trials = [r['trial'] for r in rows]
     starts = [i for i in range(len(rows)) if i == 0 or trials[i] != trials[i-1]]
     for i in starts[1:]:
@@ -250,10 +264,10 @@ def plot_methods(rows, path):
     axis.set_xticks([(a+b-1)/2 for a, b in zip(starts, starts[1:]+[len(rows)])],
                     [f'trial {trials[i]}\ncal {rows[i]["calibration"]}' for i in starts], fontsize=8)
     axis.set_xlim(-.6, len(rows)-.4)
-    axis.set_ylim(0, 1.25*max(max(r['box_cm'], r['mask_cm']) for r in rows))
+    axis.set_ylim(0, 1.25*max(max(r['box_cm'], *(r[f'{m}_cm'] for m in models)) for r in rows))
     axis.set_ylabel('Positioning error (cm)', fontsize=9, color=INK)
-    axis.legend(frameon=False, fontsize=8, ncol=2, loc='upper left')
-    figure.suptitle('Exp 3 positioning error: box centre vs SAM mask centroid, same saved frames',
+    axis.legend(frameon=False, fontsize=8, ncol=len(models)+1, loc='upper left')
+    figure.suptitle('Exp 3 positioning error: box centre vs SAM mask centroids, same saved frames',
                     fontsize=10, color=INK)
     figure.savefig(path, dpi=200, facecolor=SURFACE)
     plt.close(figure)
