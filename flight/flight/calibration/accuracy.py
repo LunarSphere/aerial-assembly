@@ -71,6 +71,28 @@ def deck_xy(frames):
                 deck_height_m=height, frames=len(frames))
 
 
+def recentre(events, centroids, intrinsics, shift=True):
+    """Keep camera events whose saved image has a centroid (image name -> pixel); optionally aim their rays there.
+
+    The log holds each frame's box-centre ray but not its refit rotation, so the new ray adds the pixel
+    offset rotated by the registration pose. Exp 3 refits differ from it by at most 0.35 degrees, which on
+    a centroid offset of a few pixels moves the deck point by about 0.1 mm.
+    """
+    out = []
+    for event in events:
+        if event.get('event') != 'camera':
+            out.append(event)
+        elif event.get('image') in centroids and 'drone_ray_world_m' in event:
+            if shift:
+                rays = pixel_rays([centroids[event['image']], event['drone']['center_px']], intrinsics)
+                pose = Pose.from_dict(event['registration']['T_lighthouse_camera'])
+                ray = dict(event['drone_ray_world_m'])
+                ray['direction'] = (np.asarray(ray['direction'])+pose.rotate(rays[0]-rays[1])).tolist()
+                event = dict(event, drone_ray_world_m=ray)
+            out.append(event)
+    return out
+
+
 def approaches(events, centres, trial):
     """One row per tag dwell that completed: Lighthouse and camera X-Y over the settled window."""
     centres = {int(k): v for k, v in centres.items()}

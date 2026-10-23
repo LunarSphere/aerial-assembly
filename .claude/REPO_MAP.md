@@ -5,7 +5,7 @@ Keep this file current: when you add, remove, rename, or change the role of a mo
 ## Top level
 - `brixzle/` brick design, MuJoCo trials, NSGA-III search, drone assembly sim. Depends on `flight` (editable).
 - `flight/` cflib flight program, Experiment 2 calibration and Experiment 3 approach accuracy (`fly`, `flight-cal`).
-- `figures/` figures with their data, generating scripts and notes: `exp3-approach-accuracy/` (Exp 3 raw logs, tables, figures), `lighthouse-rest-jitter.*` (Lighthouse jitter at rest vs calibration and battery).
+- `figures/` figures with their data, generating scripts and notes: `exp3-approach-accuracy/` (Exp 3 raw logs, tables, figures; `segment_frames.py` SAM mask centroids for the #26 box-vs-mask comparison), `lighthouse-rest-jitter.*` (Lighthouse jitter at rest vs calibration and battery).
 - `stl_exports/` CAD meshes (`2p5d_ab/`, `2p5d_ring/`, fork gripper) and `export_2p5d.py`.
 - `.github/` CI (`workflows/tests.yml`: `flight` and `brixzle` jobs) and Dependabot.
 - `.claude/` this map and project skills (`skills/pick-up-issue`, `skills/grill-me`); root `CLAUDE.md`, `CONTRIBUTING.md`, `README.md` hold the rules and overview.

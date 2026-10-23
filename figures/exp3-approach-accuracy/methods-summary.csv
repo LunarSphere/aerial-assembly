@@ -1,0 +1,13 @@
+group,measure,n,mean_cm,rmse_cm,max_cm
+pooled,box_all_frames,25,1.5373,1.7517,4.2313
+pooled,box,25,1.5440,1.8318,4.4455
+pooled,mask,25,1.6650,2.0594,4.9422
+pooled,mask_minus_box,25,0.8707,0.9487,1.4307
+calibration 1,box_all_frames,15,1.7387,2.0111,4.2313
+calibration 1,box,15,1.7952,2.1382,4.4455
+calibration 1,mask,15,2.0597,2.4417,4.9422
+calibration 1,mask_minus_box,15,0.8411,0.9155,1.3326
+calibration 2,box_all_frames,10,1.2352,1.2668,1.6769
+calibration 2,box,10,1.1671,1.2374,1.7977
+calibration 2,mask,10,1.0730,1.2882,2.1315
+calibration 2,mask_minus_box,10,0.9152,0.9964,1.4307

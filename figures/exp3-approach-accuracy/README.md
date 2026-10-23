@@ -53,10 +53,50 @@ Per-tag numbers are in [`summary.csv`](summary.csv).
    was under 1 mm on the fresh calibration, so the earlier growth in jitter looks like station
    drift rather than battery (see [`../lighthouse-rest-jitter.md`](../lighthouse-rest-jitter.md)).
 
+## Box centre vs SAM mask centroid (#26)
+
+Does measuring the drone with a segmentation mask, rather than the YOLOE box centre, close the
+positioning gap? Offline re-run on the same flights: SAM 2.1 (base), prompted with each logged
+YOLOE box, gives a whole-drone mask, and its pixel centroid is cast onto the same median-depth
+plane as the box centre. Only the frames saved during the flights (1 per second) have images, so
+both methods are compared on those frames: 2–5 per approach instead of 9–14.
+
+| Positioning error, same saved frames | Box centre: mean / RMSE / max | Mask centroid: mean / RMSE / max |
+|---|---|---|
+| All 5 trials (25 approaches) | 1.54 / 1.83 / 4.4 cm | 1.66 / 2.06 / 4.9 cm |
+| Calibration 1: trials 1, 3, 4 | 1.80 / 2.14 / 4.4 cm | 2.06 / 2.44 / 4.9 cm |
+| Calibration 2: trials 7, 8 | 1.17 / 1.24 / 1.8 cm | 1.07 / 1.29 / 2.1 cm |
+
+The box centre on the saved frames only is within 0.1 cm (mean) of the full-rate result above.
+Per approach: [`methods.csv`](methods.csv); summary: [`methods-summary.csv`](methods-summary.csv).
+
+![Box centre vs mask centroid per approach](positioning-methods.png)
+
+**Reading:**
+
+1. **The mask centroid does not close the gap.** It is better on 10 of 25 approaches, and the
+   means differ by about 0.1 cm in either direction. Calibration 2 still sits at about 1.1 cm.
+2. **The two centres differ by 0.9 cm on average, and the difference depends on the tag.** Tag 1
+   shifts +1.3 cm in Y every time (spread 0.07 cm); tag 4 shifts −0.7 cm in Y. So the choice of
+   "drone centre" moves the result by up to about 1 cm in a position-dependent way. Possible
+   causes, not yet tested: perspective (the camera sees the drone's side away from the image
+   centre), shadows inside the box, and the mask failures below.
+3. **The masks are imperfect** ([`mask-examples.png`](mask-examples.png), every 10th frame).
+   SAM sometimes drops a prop guard next to a tag or the cage frame, which moves the centroid by
+   up to about 2 cm (centroid–box distance: median 2.9 px, max 11.9 px; 1 px ≈ 1.9 mm here). It
+   sometimes includes the white tag under the drone, which pulls the centroid toward the tag
+   centre and so flatters the mask result. No frames are excluded.
+4. **The frames have the YOLOE box drawn on them** (#29). Untouched, SAM segments the drawn
+   rectangle, so its exact pixels are inpainted first; the prop guards it touched are partly
+   repainted. Clean frames from #29 would remove this step.
+
+Rebuild: `segment_frames.py` (needs the frames in `runs/exp3-s2` and the `yolo` extra) writes
+`data/trial-NN/masks.json`, then `make_figures.py` picks them up.
+
 ## Known limitations
 
 - Drone tilt is ignored; the camera measures the visual centre of the drone, not the deck sensor
-  centre.
+  centre. A SAM mask centroid does not change the positioning result (see above).
 - Each per-tag value rests on 5 approaches (2 for calibration 2 alone).
 - Z is not evaluated.
 
@@ -70,5 +110,9 @@ Per-tag numbers are in [`summary.csv`](summary.csv).
   per calibration.
 - `data/`: raw session files and full event logs (gzipped) for every attempt. `.gitattributes` hides
   them from diffs. Routes are not kept; the originals stay in `runs/`.
+- `methods.csv`, `methods-summary.csv`, `positioning-methods.png`, `mask-examples.png`: the #26
+  box-vs-mask comparison.
+- `segment_frames.py`: SAM mask centroids from the saved frames in `runs/` into `data/trial-NN/masks.json`:
+  `uv run --project flight --extra vision --extra yolo python figures/exp3-approach-accuracy/segment_frames.py runs/exp3-s2`.
 - `make_figures.py`: rebuilds everything above from `data/`:
   `uv run --project flight --extra plot python figures/exp3-approach-accuracy/make_figures.py`.
