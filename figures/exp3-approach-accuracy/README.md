@@ -68,6 +68,7 @@ Per-tag numbers are in [`summary.csv`](summary.csv).
   check residual and pad offset.
 - `summary.csv`: n, mean, RMSE, std, max and bias for each error, overall and per tag, pooled and
   per calibration.
-- `data/`: raw session files and full event logs (gzipped) for every attempt.
+- `data/`: raw session files and full event logs (gzipped) for every attempt, stored with Git LFS
+  (`git lfs install`, then `git lfs pull`). Routes are not kept; the originals stay in `runs/`.
 - `make_figures.py`: rebuilds everything above from `data/`:
   `uv run --project flight --extra plot python figures/exp3-approach-accuracy/make_figures.py`.

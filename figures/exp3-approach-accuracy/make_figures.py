@@ -36,9 +36,8 @@ def import_session(source):
             shutil.copy(path, DATA/path.name)
     for trial in sorted(source.glob('trial-*')):
         (DATA/trial.name).mkdir()
-        for name in ('report.json', 'route.json'):
-            if (trial/name).exists():
-                shutil.copy(trial/name, DATA/trial.name/name)
+        if (trial/'report.json').exists():  # route.json is regenerable and unused here
+            shutil.copy(trial/'report.json', DATA/trial.name/'report.json')
         with (trial/'events.jsonl').open('rb') as src, gzip.open(DATA/trial.name/'events.jsonl.gz', 'wb') as dst:
             shutil.copyfileobj(src, dst)
 
