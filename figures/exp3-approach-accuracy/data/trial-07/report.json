@@ -2,8 +2,8 @@
   "version": 1,
   "kind": "approach-accuracy",
   "accepted": true,
-  "created_utc": "2026-10-23T00:32:33.984454+00:00",
-  "rig_fingerprint": "14225fa92e7d04cadc915526b4264bc56b7a1595b31471f95b25f71150d8b315",
+  "created_utc": "2026-10-23T19:53:26.821892+00:00",
+  "rig_fingerprint": "97e4ed40fd8922f275efc11099416066d448782eca25507407f66b7baa9ca139",
   "demo": true,
   "visual_position_advisory": true,
   "controller": "pid",
@@ -12,7 +12,7 @@
     "critical_v": 3.1,
     "low_duration_s": 1.0
   },
-  "camera_reprojection_rms_px": 1.212935735357077,
+  "camera_reprojection_rms_px": 1.2757346849960183,
   "camera_reprojection_limit_px": 3.0,
   "camera_observation_max_age_s": 1.0,
   "geometry_uploaded": true,
@@ -28,35 +28,35 @@
   },
   "station_consistency": {
     "position_m": [
-      0.0003277148833302226,
-      -0.0026026891619652655,
-      0.001268646539571465
+      -0.001732980368162636,
+      0.0034645477793070257,
+      0.00017542180728422985
     ],
     "stations": {
       "0": {
-        "rms_mrad": 0.2590258761991707,
-        "rms_at_deck_mm": 0.4329557656937381,
-        "distance_m": 1.6714768888990412
+        "rms_mrad": 0.15440332763340067,
+        "rms_at_deck_mm": 0.26084793886152047,
+        "distance_m": 1.6893932459852865
       },
       "1": {
-        "rms_mrad": 0.41454407881379773,
-        "rms_at_deck_mm": 0.9765085504657293,
-        "distance_m": 2.3556205488689446
+        "rms_mrad": 0.1267573456519219,
+        "rms_at_deck_mm": 0.29772945292624026,
+        "distance_m": 2.348814196092517
       }
     },
-    "worst_station": "1",
-    "worst_rms_mrad": 0.41454407881379773,
+    "worst_station": "0",
+    "worst_rms_mrad": 0.15440332763340067,
     "limit_mrad": 1.5,
     "consistent": true,
-    "pad_offset_m": 0.0029139066493170727
+    "pad_offset_m": 0.0038777680541787454
   },
   "preflight": {
     "position_m": [
-      0.00013112936321704182,
-      -0.0025522224372252823,
-      0.0017815491883084178
+      -0.0017838177387602626,
+      0.003501971997320652,
+      0.00016105137401609682
     ],
-    "vbat_V": 4.154252052307129,
+    "vbat_V": 4.028621673583984,
     "controller": 1
   },
   "flight_complete": true,

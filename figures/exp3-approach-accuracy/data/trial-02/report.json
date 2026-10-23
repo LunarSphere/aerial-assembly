@@ -1,9 +1,9 @@
 {
   "version": 1,
   "kind": "approach-accuracy",
-  "accepted": false,
-  "created_utc": "2026-10-22T21:19:10.100704+00:00",
-  "rig_fingerprint": "2f3b21636bb34275417c1f5a7fab83b45f864097961bf4c4fe8a7ed283c45879",
+  "accepted": true,
+  "created_utc": "2026-10-23T19:44:35.209793+00:00",
+  "rig_fingerprint": "97e4ed40fd8922f275efc11099416066d448782eca25507407f66b7baa9ca139",
   "demo": true,
   "visual_position_advisory": true,
   "controller": "pid",
@@ -12,8 +12,54 @@
     "critical_v": 3.1,
     "low_duration_s": 1.0
   },
-  "camera_reprojection_rms_px": 1.2845591924285,
+  "camera_reprojection_rms_px": 1.2757346849960183,
   "camera_reprojection_limit_px": 3.0,
   "camera_observation_max_age_s": 1.0,
-  "reason": "Camera/tag projection mismatch (2.017274652879528 px); use --demo to refresh the camera pose against fixed tags"
+  "geometry_uploaded": true,
+  "geometry_readback_verified": true,
+  "lighthouse_upload": {
+    "supported_station_slots": 4,
+    "written_station_ids": [
+      0,
+      1
+    ],
+    "persisted": true,
+    "readback_verified": true
+  },
+  "station_consistency": {
+    "position_m": [
+      -0.0011776851249990043,
+      0.001987801868357299,
+      6.32601238548798e-06
+    ],
+    "stations": {
+      "0": {
+        "rms_mrad": 0.14615721181378774,
+        "rms_at_deck_mm": 0.24688175193333922,
+        "distance_m": 1.6891520361504986
+      },
+      "1": {
+        "rms_mrad": 0.12849332176999784,
+        "rms_at_deck_mm": 0.3018103116799788,
+        "distance_m": 2.3488404496244337
+      }
+    },
+    "worst_station": "0",
+    "worst_rms_mrad": 0.14615721181378774,
+    "limit_mrad": 1.5,
+    "consistent": true,
+    "pad_offset_m": 0.002310484481644789
+  },
+  "preflight": {
+    "position_m": [
+      -0.001228578039444983,
+      0.0019536644336767494,
+      -0.00019749621424125507
+    ],
+    "vbat_V": 3.9800586700439453,
+    "controller": 1
+  },
+  "flight_complete": true,
+  "operator_observation": "yes",
+  "independent_drone_pose_measured": false
 }
