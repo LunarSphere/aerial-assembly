@@ -42,6 +42,7 @@ Tests mock cflib; they never open a radio.
 
 - SI units; quaternions are `[w, x, y, z]` everywhere. Convert to scipy/crazyflow's scalar-last order only via `flight/flight/frames.py` (`wxyz_to_xyzw`).
 - Four-space indent, `snake_case`, dataclasses for settings, explicit input validation, finite JSON. No formatter or linter configured.
+- What to commit: hand-written configs, test fixtures, and only the raw data a figure script actually reads (under `figures/<name>/data/`, which `.gitattributes` hides from diffs). Don't commit regenerable outputs such as `route.json`, `route-preview.png` or `metrics.json`; they stay in git-ignored `runs/`.
 
 ## Repo map
 
