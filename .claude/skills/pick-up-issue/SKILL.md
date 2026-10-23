@@ -16,6 +16,6 @@ Pick up issue `$ARGUMENTS` following the workflow in `CLAUDE.md`.
    - `uv run --project flight --extra test pytest flight/tests -q` (from the repo root)
    Report failures with their output. Don't open the PR while tests fail unless the user says to.
 7. **Housekeeping.** Update `.claude/REPO_MAP.md` if modules moved or changed role. If an Experiment 2 decision changed, update the decision table in `brixzle/docs/exp2/STATUS.md`.
-8. **Commit and open the PR.** Use imperative commit subjects. Push with `git push -u origin HEAD`, then `gh pr create --base master`. The body has: a summary, `Closes #$ARGUMENTS`, the tests run, and evidence for any number (run dir, config, seed). Label simulated results "simulated, uncalibrated contact". Ask for a collaborator's review. Never merge it yourself.
+8. **Commit and open the PR.** Use imperative commit subjects. Push with `git push -u origin HEAD`, then `gh pr create --base master`. The body has: a summary, `Closes #$ARGUMENTS`, the tests run, and evidence for any number (run dir, config, seed). Label simulated results "simulated, uncalibrated contact". Ask the maintainer to review it. Merge only when they ask, once CI is green.
 
 Never arm the drone, open a radio link, or run `--arm` or `--check-only` along the way. If the issue needs a real flight, hand the human the exact command.
