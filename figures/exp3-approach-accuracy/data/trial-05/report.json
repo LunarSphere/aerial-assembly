@@ -1,9 +1,9 @@
 {
   "version": 1,
   "kind": "approach-accuracy",
-  "accepted": false,
-  "created_utc": "2026-10-22T21:30:21.905534+00:00",
-  "rig_fingerprint": "2f3b21636bb34275417c1f5a7fab83b45f864097961bf4c4fe8a7ed283c45879",
+  "accepted": true,
+  "created_utc": "2026-10-23T19:51:00.914114+00:00",
+  "rig_fingerprint": "97e4ed40fd8922f275efc11099416066d448782eca25507407f66b7baa9ca139",
   "demo": true,
   "visual_position_advisory": true,
   "controller": "pid",
@@ -12,7 +12,7 @@
     "critical_v": 3.1,
     "low_duration_s": 1.0
   },
-  "camera_reprojection_rms_px": 1.2845591924285,
+  "camera_reprojection_rms_px": 1.2757346849960183,
   "camera_reprojection_limit_px": 3.0,
   "camera_observation_max_age_s": 1.0,
   "geometry_uploaded": true,
@@ -26,5 +26,40 @@
     "persisted": true,
     "readback_verified": true
   },
-  "reason": "No stable Lighthouse position within 30 s; no arming requested"
+  "station_consistency": {
+    "position_m": [
+      -0.0013575849811684625,
+      2.2579478574516054e-05,
+      0.00018421598248018176
+    ],
+    "stations": {
+      "0": {
+        "rms_mrad": 0.13425449542704654,
+        "rms_at_deck_mm": 0.22666667765987508,
+        "distance_m": 1.6883358500501386
+      },
+      "1": {
+        "rms_mrad": 0.1219304717469891,
+        "rms_at_deck_mm": 0.286445918496542,
+        "distance_m": 2.349256214565703
+      }
+    },
+    "worst_station": "0",
+    "worst_rms_mrad": 0.13425449542704654,
+    "limit_mrad": 1.5,
+    "consistent": true,
+    "pad_offset_m": 0.0013702125171476177
+  },
+  "preflight": {
+    "position_m": [
+      -0.001255838735960424,
+      -7.704917297814972e-05,
+      0.0001767695644957712
+    ],
+    "vbat_V": 4.1595306396484375,
+    "controller": 1
+  },
+  "flight_complete": true,
+  "operator_observation": "yes",
+  "independent_drone_pose_measured": false
 }

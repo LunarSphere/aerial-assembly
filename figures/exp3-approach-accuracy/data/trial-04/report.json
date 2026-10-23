@@ -1,9 +1,9 @@
 {
   "version": 1,
   "kind": "approach-accuracy",
-  "accepted": true,
-  "created_utc": "2026-10-22T21:27:51.700684+00:00",
-  "rig_fingerprint": "2f3b21636bb34275417c1f5a7fab83b45f864097961bf4c4fe8a7ed283c45879",
+  "accepted": false,
+  "created_utc": "2026-10-23T19:48:39.981343+00:00",
+  "rig_fingerprint": "97e4ed40fd8922f275efc11099416066d448782eca25507407f66b7baa9ca139",
   "demo": true,
   "visual_position_advisory": true,
   "controller": "pid",
@@ -12,7 +12,7 @@
     "critical_v": 3.1,
     "low_duration_s": 1.0
   },
-  "camera_reprojection_rms_px": 1.2845591924285,
+  "camera_reprojection_rms_px": 1.2757346849960183,
   "camera_reprojection_limit_px": 3.0,
   "camera_observation_max_age_s": 1.0,
   "geometry_uploaded": true,
@@ -26,16 +26,29 @@
     "persisted": true,
     "readback_verified": true
   },
-  "preflight": {
+  "station_consistency": {
     "position_m": [
-      0.005944355876999907,
-      -0.008101965417154133,
-      -0.0007569724519271403
+      -0.0051522074403984,
+      -0.0006388822178177417,
+      -5.421045013439196e-05
     ],
-    "vbat_V": 3.816422462463379,
-    "controller": 1
+    "stations": {
+      "0": {
+        "rms_mrad": 0.1412515490695275,
+        "rms_at_deck_mm": 0.2384133031591515,
+        "distance_m": 1.6878632817102668
+      },
+      "1": {
+        "rms_mrad": 0.12415244382584227,
+        "rms_at_deck_mm": 0.2920369013069026,
+        "distance_m": 2.352244485147341
+      }
+    },
+    "worst_station": "0",
+    "worst_rms_mrad": 0.1412515490695275,
+    "limit_mrad": 1.5,
+    "consistent": true,
+    "pad_offset_m": 0.005191950574691955
   },
-  "flight_complete": true,
-  "operator_observation": "yes",
-  "independent_drone_pose_measured": false
+  "reason": "Battery 3.78 V < 3.8 V; swap the battery. No arming requested"
 }

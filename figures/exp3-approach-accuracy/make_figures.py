@@ -1,7 +1,7 @@
 """Exp 3 approach accuracy (issue #24): raw data, tables and figures for discussion.
 
     # once: copy the session's raw logs from runs/ (git-ignored) into data/
-    uv run --project flight --extra plot python figures/exp3-approach-accuracy/make_figures.py --import runs/exp3-s2
+    uv run --project flight --extra plot python figures/exp3-approach-accuracy/make_figures.py --import runs/exp3-r2
     # any time: rebuild the tables and figures from data/
     uv run --project flight --extra plot python figures/exp3-approach-accuracy/make_figures.py
 
@@ -34,6 +34,8 @@ def import_session(source):
     for path in sorted(source.glob('*.json')):
         if path.name != 'metrics.json':  # derived; rebuilt here
             shutil.copy(path, DATA/path.name)
+    for path in sorted(source.glob('survey*.png')):  # camera view of the tag survey; not regenerable
+        shutil.copy(path, DATA/path.name)
     for trial in sorted(source.glob('trial-*')):
         (DATA/trial.name).mkdir()
         if (trial/'report.json').exists():  # route.json is regenerable and unused here
@@ -126,7 +128,7 @@ def plot_by_tag(approaches, path):
             style(axis)
             axis.axhline(0, color=MUTED, linewidth=.8)
             axis.axvline(0, color=MUTED, linewidth=.8)
-            for calibration in sorted(CALIBRATION_COLOURS):
+            for calibration in sorted({r['calibration'] for r in approaches}):
                 vectors = np.array([r[f'{kind}_error_xy_m'] for r in approaches if r['tag_id'] == tag
                                     and r['calibration'] == calibration and r[f'{kind}_error_xy_m']]).reshape(-1, 2)*100
                 axis.scatter(vectors[:, 0], vectors[:, 1], s=40, marker=CALIBRATION_MARKERS[calibration],
@@ -145,9 +147,15 @@ def plot_by_tag(approaches, path):
             if column == 0:
                 axis.set_ylabel(f'{kind.capitalize()}\nY error (cm)', fontsize=8, color=MUTED)
     axes[0, -1].legend(frameon=False, fontsize=8, loc='lower right')
-    figure.suptitle('Exp 3 approach error per tag (5 trials, 25 approaches)', fontsize=10, color=INK)
+    trials = len({r['trial'] for r in approaches})
+    figure.suptitle(f'Exp 3 approach error per tag ({trials} trials, {len(approaches)} approaches)', fontsize=10, color=INK)
     figure.savefig(path, dpi=200, facecolor=SURFACE)
     plt.close(figure)
+
+
+def plot_approach_errors(approaches, path):
+    """The `flight-cal approach-metrics` plot: error vectors drawn around each tag in the Lighthouse frame."""
+    accuracy.plot(dict(approaches=approaches, summary=accuracy.summarize(approaches)), path)
 
 
 def plot_by_trial(approaches, trials, path):
@@ -159,7 +167,7 @@ def plot_by_trial(approaches, trials, path):
     panels = [('positioning', 'Positioning error (cm)'), ('control', 'Control error (cm)')]
     for axis, (kind, label) in zip(axes[:2], panels):
         style(axis)
-        for calibration in sorted(CALIBRATION_COLOURS):
+        for calibration in sorted({r['calibration'] for r in approaches}):
             rows = [r for r in approaches if r['calibration'] == calibration and r[f'{kind}_error_m'] is not None]
             x = [order[r['trial']]+(r['tag_id']-2)*.06 for r in rows]
             axis.scatter(x, [r[f'{kind}_error_m']*100 for r in rows], s=36, marker=CALIBRATION_MARKERS[calibration],
@@ -203,6 +211,7 @@ def main():
     write_csv(HERE/'summary.csv', summary, list(summary[0]))
     plot_by_tag(approaches, HERE/'errors-by-tag.png')
     plot_by_trial(approaches, trials, HERE/'errors-by-trial.png')
+    plot_approach_errors(approaches, HERE/'approach-errors.png')
     for row in summary:
         if row['tag'] == 'all':
             print(f'{row["group"]:14s} {row["error"]:11s} n={row["n"]:2d} mean {row["mean_cm"]:.2f} cm, '

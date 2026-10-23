@@ -771,6 +771,28 @@ def test_metrics_and_plot_regenerate_offline(tmp_path):
     assert (root/'approach-errors.png').exists()
 
 
+def test_exp3_figure_import_keeps_survey_image_and_plots_approach_errors(tmp_path, monkeypatch):
+    pytest.importorskip('matplotlib')
+    import importlib.util
+    script = Path(__file__).resolve().parents[2]/'figures'/'exp3-approach-accuracy'/'make_figures.py'
+    spec = importlib.util.spec_from_file_location('exp3_make_figures', script)
+    figures = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(figures)
+    monkeypatch.setattr(figures, 'DATA', tmp_path/'data')
+    root = synthetic_session(tmp_path/'session')
+    (root/'survey.png').write_bytes(b'png')
+    (root/'approach-errors.png').write_bytes(b'derived')
+    for trial in ('trial-01', 'trial-02'):
+        artifacts.write(root/trial/'report.json', dict(version=1))
+    (root/'trial-02'/'events.jsonl').write_text('')
+    figures.import_session(root)
+    assert (tmp_path/'data'/'survey.png').read_bytes() == b'png'
+    assert not (tmp_path/'data'/'approach-errors.png').exists()  # derived; rebuilt from data/
+    _, approaches, _ = figures.load()
+    figures.plot_approach_errors(approaches, tmp_path/'approach-errors.png')
+    assert (tmp_path/'approach-errors.png').stat().st_size > 0
+
+
 def calibrated_files(tmp_path, survey, view):
     transform, intrinsics, _ = view
     lh, ca = accepted_sessions(tmp_path, survey)

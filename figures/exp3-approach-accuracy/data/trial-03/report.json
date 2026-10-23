@@ -2,8 +2,8 @@
   "version": 1,
   "kind": "approach-accuracy",
   "accepted": true,
-  "created_utc": "2026-10-22T21:25:45.769436+00:00",
-  "rig_fingerprint": "2f3b21636bb34275417c1f5a7fab83b45f864097961bf4c4fe8a7ed283c45879",
+  "created_utc": "2026-10-23T19:46:49.513865+00:00",
+  "rig_fingerprint": "97e4ed40fd8922f275efc11099416066d448782eca25507407f66b7baa9ca139",
   "demo": true,
   "visual_position_advisory": true,
   "controller": "pid",
@@ -12,7 +12,7 @@
     "critical_v": 3.1,
     "low_duration_s": 1.0
   },
-  "camera_reprojection_rms_px": 1.2845591924285,
+  "camera_reprojection_rms_px": 1.2757346849960183,
   "camera_reprojection_limit_px": 3.0,
   "camera_observation_max_age_s": 1.0,
   "geometry_uploaded": true,
@@ -26,13 +26,37 @@
     "persisted": true,
     "readback_verified": true
   },
+  "station_consistency": {
+    "position_m": [
+      0.0001779190707980414,
+      0.0035753558564779273,
+      -0.0003494276950391109
+    ],
+    "stations": {
+      "0": {
+        "rms_mrad": 0.12396357755043375,
+        "rms_at_deck_mm": 0.20951936743502902,
+        "distance_m": 1.6901687703372992
+      },
+      "1": {
+        "rms_mrad": 0.057580791212397626,
+        "rms_at_deck_mm": 0.13518768744532067,
+        "distance_m": 2.347791417916703
+      }
+    },
+    "worst_station": "0",
+    "worst_rms_mrad": 0.12396357755043375,
+    "limit_mrad": 1.5,
+    "consistent": true,
+    "pad_offset_m": 0.0035967936290903593
+  },
   "preflight": {
     "position_m": [
-      -0.0029259704635478554,
-      0.007114746479783207,
-      -7.802225736668334e-05
+      -1.5684660320403053e-05,
+      0.0031689442694187164,
+      -0.00020342362258816138
     ],
-    "vbat_V": 3.9008798599243164,
+    "vbat_V": 3.8744869232177734,
     "controller": 1
   },
   "flight_complete": true,
