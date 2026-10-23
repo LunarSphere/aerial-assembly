@@ -51,6 +51,35 @@ The tag survey the positioning error is measured against (drone on its pad, all 
 3. **Trial count.** 5 trials, not the planned 20. Of 7 attempts, trial 4 stopped at preflight
    (battery 3.78 V, below the 3.8 V minimum) and trial 6 stopped on stale camera observations.
 
+## Box centre vs SAM mask centroid (#26)
+
+The positioning error above uses the centre of the YOLOE detection box. As an alternative, SAM 2.1-base
+(`sam2.1_b.pt`) is prompted with each saved frame's logged YOLOE box, and the centroid of the drone mask
+is cast through that frame's camera pose instead. The camera saves about one frame per second, so both
+methods are compared on the same 1–5 saved frames per approach (378 frames, all segmented). This was run
+offline from the flown logs, with no new flights.
+
+| Measure (25 approaches) | mean / RMSE / max |
+|---|---|
+| Box centre, all frames (as above) | 1.58 / 1.69 / 2.73 cm |
+| Box centre, saved frames only | 1.60 / 1.74 / 3.19 cm |
+| SAM mask centroid, same saved frames | 1.12 / 1.31 / 2.66 cm |
+| Distance between the two estimates | 0.74 / 0.82 / 1.34 cm |
+
+![Positioning error per approach, box centre vs SAM mask centroid](positioning-methods.png)
+
+- The mask centroid has lower error on 24 of 25 approaches (two-sided sign test p ≈ 2e-6).
+- Most of the gain is a consistent shift: on average the mask centroid sits (−0.03, +0.43) cm from the
+  box centre, against a box-centre bias of (+0.68, −0.98) cm. The shift differs by tag (for example
+  +1.0 cm in Y at tags 0 and 1, −0.5 cm at tag 4), so it is not a constant offset.
+- **No ground truth.** Both are compared with the surveyed tag centres, so a lower error doesn't mean
+  the mask centroid is the deck centre. The whole-drone mask includes the prop discs and can be clipped
+  where the drone overlaps the cage frame ([`mask-examples.png`](mask-examples.png)). The static
+  ground-truth test (#34) is what would settle it.
+
+Rebuild: `segment_frames.py` needs the saved frames in `runs/exp3-r2` (git-ignored) and writes
+`data/trial-NN/masks-sam.json`; `make_figures.py` then writes the comparison from `data/`.
+
 ## Known limitations
 
 - Drone tilt is ignored; the camera measures the visual centre of the drone, not the deck sensor
@@ -67,5 +96,9 @@ The tag survey the positioning error is measured against (drone on its pad, all 
 - `summary.csv`: n, mean, RMSE, std, max and bias for each error, overall and per tag.
 - `data/`: raw session files, the tag-survey image and full event logs (gzipped) for every
   attempt. `.gitattributes` hides them from diffs. Routes are not kept; the originals stay in `runs/`.
+- `methods.csv`, `methods-summary.csv`: box centre vs SAM mask centroid per approach and summarised;
+  `sam_better` counts the approaches where the mask centroid has the lower error.
+- `segment_frames.py`: SAM 2.1 mask centroids of the saved frames (#26):
+  `uv run --project flight --extra vision --extra yolo python figures/exp3-approach-accuracy/segment_frames.py runs/exp3-r2`.
 - `make_figures.py`: rebuilds everything above from `data/`:
   `uv run --project flight --extra plot python figures/exp3-approach-accuracy/make_figures.py`.
