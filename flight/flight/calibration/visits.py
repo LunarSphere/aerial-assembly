@@ -80,12 +80,7 @@ def route(rig, calibration, intrinsics, offset_m=.15, demo=False):
             raise ValueError(f'No unobscured inward waypoint fits for tag {tag["id"]}; '
                              'adjust the camera view or tag layout')
     if demo:
-        remaining, visits, here = visits, [], np.asarray(rig['home']['pos'][:2])
-        while remaining:
-            visit = min(remaining, key=lambda v: np.linalg.norm(np.asarray(v['target_body_m'][:2])-here))
-            remaining.remove(visit)
-            visits.append(visit)
-            here = np.asarray(visit['target_body_m'][:2])
+        visits = nearest_order(visits, rig['home']['pos'])
     else:
         order = {tag['id']: i for i, tag in enumerate(sorted(rig['tags'], key=lambda t:
                  ({'origin': 0, 'x': 1, 'xy': 2, 'check': 3}[t['role']], t['id'])))}
@@ -97,6 +92,69 @@ def route(rig, calibration, intrinsics, offset_m=.15, demo=False):
                   camera_profile=intrinsics['profile'],
                   T_lighthouse_camera=calibration['T_lighthouse_camera'],
                   visibility_scope='nominal dwell positions; transit may occlude tags')
+    return result
+
+
+def nearest_order(visits, start):
+    remaining, ordered, here = list(visits), [], np.asarray(start[:2], float)
+    while remaining:
+        visit = min(remaining, key=lambda v: np.linalg.norm(np.asarray(v['target_body_m'][:2])-here))
+        remaining.remove(visit)
+        ordered.append(visit)
+        here = np.asarray(visit['target_body_m'][:2])
+    return ordered
+
+
+def centre_route(rig, calibration, intrinsics, centres=None, demo=False, dwell_s=5.):
+    """Hover with the Lighthouse deck directly over each tag centre (Exp 3).
+
+    The drone covers its target tag by design, so no occlusion test is made; every
+    dwell envelope must still project inside the camera image. ``centres`` maps tag id
+    to a surveyed Lighthouse-frame centre; it defaults to the rig.json tag poses.
+    """
+    if not math.isfinite(dwell_s) or not 0 < dwell_s <= 30:
+        raise ValueError('--dwell-s must be greater than zero and at most 30 seconds')
+    inv = Pose.from_dict(calibration['T_lighthouse_camera']).inverse()
+    rv = Rotation.from_quat(wxyz_to_xyzw(inv.quat)).as_rotvec()
+    tv = np.asarray(inv.pos)
+    lo, hi = (np.asarray(rig['envelope_body_m'][key], float) for key in ('min', 'max'))
+    envelope = np.array([[x, y, z] for x in (lo[0], hi[0]) for y in (lo[1], hi[1]) for z in (lo[2], hi[2])])
+    width, height = (intrinsics['profile'][key] for key in ('width', 'height'))
+    offset = np.asarray(rig['body_to_sample_m'], float)
+
+    def project(points, outside_message):
+        points = np.asarray(points, float).reshape(-1, 3)
+        if np.any(inv.apply(points)[:, 2] <= 0):
+            raise ValueError('Route or tag lies behind the calibrated camera')
+        projected = project_points(points, rv, tv, intrinsics)
+        if np.any(projected < 0) or np.any(projected >= [width, height]):
+            raise ValueError(outside_message)
+        return projected
+
+    centres = {int(k): np.asarray(v, float) for k, v in (centres or {}).items()}
+    tags = {}
+    visits = []
+    for tag in rig['tags']:
+        centre = centres.get(tag['id'], np.asarray(tag['pose']['pos'], float))
+        if centre.shape != (3,) or not np.all(np.isfinite(centre)):
+            raise ValueError(f'Tag {tag["id"]}: invalid surveyed centre')
+        tags[tag['id']] = project(corners(tag), 'Saved tag map projects outside the camera view; check registration')
+        # Body target that puts the deck sensor centre (the Lighthouse reference) over the tag.
+        target = np.array([*(centre[:2]-offset[:2]), hover_height(rig)])
+        message = f'Tag {tag["id"]}: drone over the tag centre would leave the camera view'
+        body = project(envelope+target, message)
+        deck = project(target+offset, message)[0]
+        visits.append(dict(name=f'tag-{tag["id"]}', tag_id=tag['id'], tag_centre_m=centre.tolist(),
+                           target_body_m=target.tolist(), dwell_s=float(dwell_s),
+                           projected_body_px=cv().convexHull(body.astype(np.float32)).reshape(-1, 2).tolist(),
+                           projected_target_px=deck.tolist()))
+    result = flight_route(rig, demo=demo, visits=nearest_order(visits, rig['home']['pos']))
+    result.update(kind='approach-accuracy', mode='over_centre',
+                  centre_source='survey' if centres else 'rig',
+                  projected_tags_px={str(key): points.tolist() for key, points in tags.items()},
+                  camera_profile=intrinsics['profile'],
+                  T_lighthouse_camera=calibration['T_lighthouse_camera'],
+                  visibility_scope='target tag is covered at its dwell by design')
     return result
 
 
@@ -115,12 +173,22 @@ def preview(plan, path):
             continue
         polygon = np.rint(segment['projected_body_px']).astype(np.int32)
         centre = tuple(polygon.mean(axis=0).astype(int))
-        tag_centre = tuple(np.mean(plan['projected_tags_px'][str(segment['tag_id'])], axis=0).astype(int))
         c.polylines(image, [polygon], True, (160, 70, 10), 1)
+        if 'projected_target_px' in segment:
+            target = tuple(np.rint(segment['projected_target_px']).astype(int))
+            c.drawMarker(image, target, (10, 10, 200), c.MARKER_CROSS, 18, 2)
+            c.putText(image, f'{segment["tag_id"]}: over centre', (centre[0]+12, centre[1]-12),
+                      c.FONT_HERSHEY_SIMPLEX, .45, (160, 70, 10), 1)
+            continue
+        tag_centre = tuple(np.mean(plan['projected_tags_px'][str(segment['tag_id'])], axis=0).astype(int))
         c.arrowedLine(image, tag_centre, centre, (160, 70, 10), 1, tipLength=.12)
         c.putText(image, f'{segment["tag_id"]}: {segment["inward_offset_m"]*100:.0f} cm', centre,
                   c.FONT_HERSHEY_SIMPLEX, .45, (160, 70, 10), 1)
-    c.putText(image, 'Predicted dwell footprints; 2 cm envelope margin + 4 px tag border',
-              (15, 25), c.FONT_HERSHEY_SIMPLEX, .55, (40, 40, 40), 1)
+    title = ('Commanded deck centres (cross) and dwell footprints, in visit order' if plan.get('mode') == 'over_centre'
+             else 'Predicted dwell footprints; 2 cm envelope margin + 4 px tag border')
+    c.putText(image, title, (15, 25), c.FONT_HERSHEY_SIMPLEX, .55, (40, 40, 40), 1)
+    if plan.get('mode') == 'over_centre':
+        c.putText(image, 'Crosses are at hover height: their image offset from each tag is camera perspective',
+                  (15, 48), c.FONT_HERSHEY_SIMPLEX, .55, (40, 40, 40), 1)
     if not c.imwrite(str(path), image):
         raise OSError(f'Could not save route preview: {path}')

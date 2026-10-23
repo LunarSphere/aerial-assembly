@@ -136,8 +136,7 @@ class RealSenseCamera:
         source = self.align.process(frames).get_depth_frame()
         if not source:
             raise RuntimeError('No RealSense depth frame')
-        depth = np.asanyarray(source.get_data()).astype(float) * self.scale
-        depth[depth <= 0] = np.nan
+        depth = depth_metres(np.asanyarray(source.get_data()), self.scale)
         self._last_color_number, self._last_color_digest = number, digest
         return Frame(image, time.monotonic(), depth, metadata)
 
@@ -149,6 +148,15 @@ class RealSenseCamera:
                 self._restore_emitter = None
         finally:
             self.pipeline.stop()
+
+
+def depth_metres(raw, scale):
+    """z16 depth to metres. 0 is "no depth"; a saturated 65535 has also been seen
+    intermittently on this D455 (it would read as 65.5 m), so both become NaN."""
+    raw = np.asarray(raw)
+    depth = raw.astype(float)*scale
+    depth[(raw == 0) | (raw == np.iinfo(np.uint16).max)] = np.nan
+    return depth
 
 
 def open_camera(args):

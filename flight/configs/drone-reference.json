@@ -7,7 +7,7 @@
     933,
     433
   ],
-  "description": "Visual references of the actual CF21B at its original support and two positions/backgrounds. Every class denotes the same drone; runtime uses class-agnostic suppression.",
+  "description": "Visual references of the actual CF21B at its original support and two positions/backgrounds, plus three hovering views over cage-frame bars and cables near tags 0, 1 and 3 (Exp 3 session exp3-s1, trial 1; boxes projected from the Lighthouse pose). Every class denotes the same drone; runtime uses class-agnostic suppression.",
   "references": [
     {
       "image": "drone-reference.jpg",
@@ -34,6 +34,33 @@
         462,
         478,
         528
+      ]
+    },
+    {
+      "image": "drone-reference-hover-tag1.jpg",
+      "bbox_xyxy": [
+        500,
+        592,
+        579,
+        672
+      ]
+    },
+    {
+      "image": "drone-reference-hover-tag3.jpg",
+      "bbox_xyxy": [
+        951,
+        100,
+        1036,
+        183
+      ]
+    },
+    {
+      "image": "drone-reference-hover-tag0.jpg",
+      "bbox_xyxy": [
+        1001,
+        548,
+        1088,
+        630
       ]
     }
   ]

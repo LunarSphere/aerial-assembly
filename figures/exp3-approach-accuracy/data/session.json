@@ -1,0 +1,87 @@
+{
+  "version": 1,
+  "kind": "approach-accuracy",
+  "created_utc": "2026-10-22T21:16:57.144951+00:00",
+  "dry_run": false,
+  "rig_fingerprint": "14225fa92e7d04cadc915526b4264bc56b7a1595b31471f95b25f71150d8b315",
+  "settings": {
+    "demo": true,
+    "controller": "pid",
+    "dwell_s": 5.0
+  },
+  "setup": "runs/setup-exp3e",
+  "calibration": "runs/setup-exp3e/camera",
+  "lighthouse": "runs/setup-exp3e/lighthouse",
+  "target_trials": 5,
+  "trials": [
+    {
+      "index": 1,
+      "dir": "trial-01",
+      "accepted": true,
+      "flight_complete": true
+    },
+    {
+      "index": 2,
+      "dir": "trial-02",
+      "accepted": false,
+      "reason": "Camera/tag projection mismatch (2.017274652879528 px); use --demo to refresh the camera pose against fixed tags"
+    },
+    {
+      "index": 3,
+      "dir": "trial-03",
+      "accepted": true,
+      "flight_complete": true
+    },
+    {
+      "index": 4,
+      "dir": "trial-04",
+      "accepted": true,
+      "flight_complete": true
+    },
+    {
+      "index": 5,
+      "dir": "trial-05",
+      "accepted": false,
+      "reason": "No stable Lighthouse position within 30 s; no arming requested"
+    },
+    {
+      "index": 6,
+      "dir": "trial-06",
+      "accepted": false,
+      "reason": "No stable Lighthouse position within 30 s (last 5 s spread: position [102.9, 139.9, 138.9] mm (limit 20), variance [0.0001, 0.0001, 0.0002] (limit 0.001)); no arming requested"
+    },
+    {
+      "index": 7,
+      "dir": "trial-07",
+      "accepted": true,
+      "calibration": 2,
+      "flight_complete": true
+    },
+    {
+      "index": 8,
+      "dir": "trial-08",
+      "accepted": true,
+      "calibration": 2,
+      "flight_complete": true
+    }
+  ],
+  "calibrations": [
+    {
+      "index": 1,
+      "setup": "runs/setup-exp3e",
+      "from_trial": 1,
+      "rig_fingerprint": "2f3b21636bb34275417c1f5a7fab83b45f864097961bf4c4fe8a7ed283c45879",
+      "rig": "rig.json",
+      "survey": "survey.json"
+    },
+    {
+      "index": 2,
+      "setup": "runs/setup-exp3f",
+      "rig_fingerprint": "14225fa92e7d04cadc915526b4264bc56b7a1595b31471f95b25f71150d8b315",
+      "rig": "rig-02.json",
+      "survey": "survey-02.json",
+      "from_trial": 7,
+      "created_utc": "2026-10-23T00:32:31.198917+00:00"
+    }
+  ]
+}

@@ -58,6 +58,7 @@ CI (`.github/workflows/tests.yml`) runs both pytest jobs on every PR and on `mas
 - When an Experiment 2 decision changes (thrust, sensing, gripper, controller, fixture), update the decision table in `brixzle/docs/exp2/STATUS.md` in the same PR.
 - Four-space indent, `snake_case`, `PascalCase` classes, dataclasses for settings, explicit input validation, finite JSON. No formatter or linter; match the surrounding code.
 - Physics changes: check determinism and invalid states, and keep synthetic smoke tests separate from validated CAD results.
+- What to commit: hand-written configs, test fixtures, and only the raw data a figure script actually reads (under `figures/<name>/data/`, which `.gitattributes` hides from diffs). Don't commit regenerable outputs such as `route.json`, `route-preview.png` or `metrics.json`; they stay in git-ignored `runs/`.
 - Commits: short imperative subject, one coherent change.
 
 ## Architecture

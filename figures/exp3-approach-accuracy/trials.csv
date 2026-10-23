@@ -1,0 +1,9 @@
+trial,calibration,accepted,reason,preflight_battery_v,station_residual_mrad,launch_offset_mm
+1,1,True,,4.0656,,3.5007
+2,1,False,Camera/tag projection mismatch (2.017274652879528 px); use --demo to refresh the camera pose against fixed tags,,,
+3,1,True,,3.9009,,10.8668
+4,1,True,,3.8164,,17.0302
+5,1,False,No stable Lighthouse position within 30 s; no arming requested,,,
+6,1,False,"No stable Lighthouse position within 30 s (last 5 s spread: position [102.9, 139.9, 138.9] mm (limit 20), variance [0.0001, 0.0001, 0.0002] (limit 0.001)); no arming requested",,,
+7,2,True,,4.1543,0.4145,2.2613
+8,2,True,,4.0065,0.4447,1.3977

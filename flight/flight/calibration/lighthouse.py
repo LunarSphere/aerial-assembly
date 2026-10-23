@@ -11,6 +11,9 @@ import numpy as np
 from . import artifacts
 
 LIMIT_M = .0004
+SOLVER_EVALUATIONS = 1000
+# Calibrated stations explain a resting drone's sweep angles to about 0.1-0.5 mrad (set from setup data).
+STATION_RESIDUAL_MRAD = 1.5
 
 
 def wait_callback(start, timeout=30.):
@@ -217,7 +220,18 @@ def solve(raw):
     data = LhGeoInputContainerData(LhDeck4SensorPositions.positions)
     data.origin, data.x_axis, data.xy_plane = groups['origin'][0], groups['x'], groups['xy']
     data.xyz_space, data.verification = groups['xyz'], groups['verification']
-    result = LhGeoEstimationManager.estimate_geometry(data)
+    # cflib stops each least-squares pass after 100 evaluations and then reports "not converged".
+    # With 16 samples one pass needs more; the final fit is the same, so allow more evaluations.
+    from cflib.localization import lighthouse_geometry_solver as geometry_solver
+    original_init = geometry_solver.SolverData.__init__
+    def more_evaluations(self):
+        original_init(self)
+        self.max_nr_iter = SOLVER_EVALUATIONS
+    geometry_solver.SolverData.__init__ = more_evaluations
+    try:
+        result = LhGeoEstimationManager.estimate_geometry(data)
+    finally:
+        geometry_solver.SolverData.__init__ = original_init
     samples = [dict(role=str(s.sample_type), valid=s.is_valid,
                     position_m=s.pose.translation.tolist() if s.has_pose else None,
                     error_m=float(s.error_distance) if np.isfinite(s.error_distance) else None,
@@ -244,6 +258,44 @@ def solve(raw):
                 verification_limit_m=LIMIT_M, max_verification_error_m=maximum,
                 coverage_ok=bool(coverage), estimation_stats=stats(result.error_stats),
                 verification_stats=stats(result.verification_stats), samples=samples, geometry=geometry)
+
+
+def station_consistency(angles, geometry, start=(0., 0., 0.), limit_mrad=STATION_RESIDUAL_MRAD):
+    """Fit one deck pose to every station's sweep angles through the stored geometry.
+
+    If the stations still match their calibration, one pose explains all angles to the
+    measurement noise. A station that moved since calibration cannot be fitted together with
+    the others, and its residual stands out. Independent of exactly where the drone rests.
+    """
+    from scipy.optimize import least_squares
+    from scipy.spatial.transform import Rotation
+    from cflib.localization.lighthouse_bs_vector import LighthouseBsVector
+    from cflib.localization.lighthouse_types import LhDeck4SensorPositions
+    sensors = np.asarray(LhDeck4SensorPositions.positions, float)
+    stations = sorted(angles)
+    measured = {k: np.asarray(angles[k], float) for k in stations}
+    frames = {k: (np.asarray(geometry[k]['rotation'], float), np.asarray(geometry[k]['origin'], float))
+              for k in stations}
+
+    def predict(params, k):
+        world = Rotation.from_rotvec(params[:3]).apply(sensors)+params[3:]
+        rotation, origin = frames[k]
+        return np.array([LighthouseBsVector.from_cart(rotation.T @ (p-origin)).lh_v1_angle_pair for p in world])
+
+    def residual(params):
+        return np.concatenate([(predict(params, k)-measured[k]).ravel() for k in stations])
+
+    fit = least_squares(residual, np.r_[0., 0., 0., np.asarray(start, float)], x_scale='jac')
+    per_station = {}
+    for k in stations:
+        r = (predict(fit.x, k)-measured[k]).ravel()
+        distance = float(np.linalg.norm(fit.x[3:]-frames[k][1]))
+        rms = float(np.sqrt(np.mean(r**2)))
+        per_station[k] = dict(rms_mrad=rms*1000, rms_at_deck_mm=rms*distance*1000, distance_m=distance)
+    worst = max(per_station, key=lambda k: per_station[k]['rms_mrad'])
+    return dict(position_m=fit.x[3:].tolist(), stations=per_station, worst_station=worst,
+                worst_rms_mrad=per_station[worst]['rms_mrad'], limit_mrad=limit_mrad,
+                consistent=bool(per_station[worst]['rms_mrad'] <= limit_mrad))
 
 
 def solve_bounded(raw_path, output, timeout=120.):

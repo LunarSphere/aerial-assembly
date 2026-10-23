@@ -21,7 +21,7 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: flight/uv.lock
-      - run: uv run --project flight --extra test --extra vision pytest flight/tests -q
+      - run: uv run --project flight --extra test --extra vision --extra plot pytest flight/tests -q
 
   brixzle:
     runs-on: ubuntu-latest

@@ -16,6 +16,14 @@ from .drone import NanoDetector, observe
 from .presets import default_hardware
 from .vision import detect
 
+# Three-placement drone fits on this rig consistently land at 2-2.5 px RMS, never near 1 px.
+# Demo flights refit the camera pose to the fixed tags (typically ~0.5 px) before flying.
+CAMERA_RMS_LIMIT_PX = 3.
+
+SPACE_SAMPLES, CHECK_SAMPLES = 8, 5
+# A hand-held drone moving 3 mm at 1.5-2 m changes sweep angles by about 2 mrad.
+STILL_LIMIT_RAD = .004
+
 PROMPTS = (
     '1/4 Place the drone LEVEL on its support where you want the origin. Face its nose along your intended +X direction. Press Enter.',
     '2/4 Move the SAME support and drone exactly 1 metre along +X. Keep the same height and nose direction. Press Enter.',
@@ -153,6 +161,119 @@ def paired_sample(cf, camera, detector, stations, role, output, index):
     return dict(role=role, **sample, camera=observation)
 
 
+def held_still(sample, limit_rad=STILL_LIMIT_RAD):
+    """Peak-to-peak spread of each station's mean sweep angles across the averaged packets."""
+    spread = max(float(np.ptp([np.mean(packet[k], axis=0) for packet in sample['packets']], axis=0).max())
+                 for k in sample['angles'])
+    return spread <= limit_rad, spread
+
+
+def enter_trigger(ask):
+    def wait(role, index, total):
+        ask(f'{role} {index}/{total}: hold the drone still here with both stations visible; press Enter to record. ')
+    return wait
+
+
+class StillAfterMove:
+    """Fires once the drone has moved (gyro above MOVE_DPS) and then held still for HOLD_S."""
+    MOVE_DPS, STILL_DPS, HOLD_S = 60., 10., 1.5
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.moved, self.still_since = False, None
+
+    def update(self, t, rate_dps):
+        if rate_dps > self.MOVE_DPS:
+            self.moved, self.still_since = True, None
+        elif rate_dps < self.STILL_DPS:
+            self.still_since = t if self.still_since is None else self.still_since
+            if self.moved and t-self.still_since >= self.HOLD_S:
+                self.reset()
+                return True
+        else:
+            self.still_since = None
+        return False
+
+
+def motion_trigger(cf, LogConfig=None, clock=None):
+    """Hands-free: carry the drone to a new spot and hold it still. Reads the drone's gyro; no camera."""
+    from contextlib import ExitStack
+    from queue import Empty
+    from ..preflight import samples
+    if LogConfig is None:
+        from cflib.crazyflie.log import LogConfig
+    clock = clock or RealClock()
+    stack = ExitStack()
+    queue = stack.enter_context(samples(cf, LogConfig, clock, ('gyro.x', 'gyro.y', 'gyro.z'),
+                                        period_ms=50, log_name='Setup motion'))
+    detector = StillAfterMove()
+
+    def wait(role, index, total, timeout=300.):
+        print(f'{role} {index}/{total}: carry the drone to a NEW spot, then hold it still for 2 seconds.', flush=True)
+        while True:  # ignore motion from before this prompt
+            try:
+                queue.get_nowait()
+            except Empty:
+                break
+        detector.reset()
+        deadline = last_hint = clock.time()
+        deadline += timeout
+        while True:
+            if not cf.is_connected():
+                raise ConnectionError('Crazyradio disconnected during space sampling')
+            if clock.time() > deadline:
+                raise TimeoutError('No move-and-hold within 5 minutes; restart setup')
+            if clock.time()-last_hint >= 5:
+                print('  waiting: ' + ('hold still...' if detector.moved else
+                                       'move the drone to a new spot first (it must be carried, not just held)'),
+                      flush=True)
+                last_hint = clock.time()
+            try:
+                received, data = queue.get(timeout=.2)
+            except Empty:
+                continue
+            if isinstance(data, Exception):
+                raise data
+            rate = float(np.linalg.norm([data['gyro.x'], data['gyro.y'], data['gyro.z']]))
+            if detector.update(received, rate):
+                print('  still: recording...', flush=True)
+                return
+    wait.stop = stack.close
+    return wait
+
+
+def collect_space_samples(cf, stations, output, raw, trigger, space=SPACE_SAMPLES, checks=CHECK_SAMPLES):
+    """Lighthouse-only samples across the flight volume: no drone detection, so hands may be in view."""
+    print(f'Now {space} space samples, then {checks} checks at NEW spots. Hold the drone by its body, '
+          'keep hands off the top deck, and cover the whole flight area: each tag, including the far '
+          'corners, and hover height (about 20-40 cm above the tags) as well as the floor.', flush=True)
+    roles = ['xyz']*space+['verification']*checks
+    for i, role in enumerate(roles):
+        label = 'Space sample' if role == 'xyz' else 'Check'
+        number, total = (i+1, space) if role == 'xyz' else (i+1-space, checks)
+        while True:
+            trigger(label, number, total)
+            try:
+                sample = lighthouse.collect(cf, stations, diagnostics_path=output/f'space-{i:02d}-lighthouse-stream.json')
+            except TimeoutError as error:
+                print(f'Sample not recorded: {error}. Keep both stations in view and try again.', flush=True)
+                continue
+            still, spread = held_still(sample)
+            if not still:
+                print(f'Drone moved during the sample (sweep spread {spread*1000:.1f} mrad); hold still and try again.',
+                      flush=True)
+                continue
+            raw['samples'].append(dict(role=role, **sample, still_spread_rad=spread))
+            artifacts.write(output/'samples.json', raw)
+            print(f'Recorded {label.lower()} {number}/{total}.', flush=True)
+            break
+        if role == 'xyz' and number == space and checks:
+            print('Space samples complete. Checks must be at NEW spots, spread across the area and heights.', flush=True)
+    return raw
+
+
 def collect_samples(cf, camera, detector, stations, output, ask=input):
     """Three reference placements: origin, +X and an off-axis point on the same plane."""
     raw = dict(version=1, base_stations=stations, samples=[], reference_only=True)
@@ -180,7 +301,7 @@ def collect_samples(cf, camera, detector, stations, output, ask=input):
     return raw
 
 
-def align_reference_camera(raw, world, intrinsics, max_rms_px=1.):
+def align_reference_camera(raw, world, intrinsics, max_rms_px=CAMERA_RMS_LIMIT_PX):
     """Three RGB-D correspondences determine a provisional rigid transform."""
     points = [s['camera']['point_camera_m'] for s in raw['samples']]
     if len(points) != 3 or any(p is None for p in points):
@@ -217,22 +338,29 @@ def align_reference_camera(raw, world, intrinsics, max_rms_px=1.):
                                residual_lighthouse_m=(transform.apply(camera[i])-world[i]).tolist())
                           for i, s in enumerate(raw['samples'])]
     return dict(T_lighthouse_camera=transform.to_dict(), reprojection_rms_px=rms,
-                reprojection_limit_px=max_rms_px, rms_limit_overridden=max_rms_px != 1.,
+                reprojection_limit_px=max_rms_px, rms_limit_overridden=max_rms_px != CAMERA_RMS_LIMIT_PX,
                 reference_pair_diagnostics=pair_diagnostics, training_sample_diagnostics=sample_diagnostics,
                 training_max_error_m=float(np.max(np.linalg.norm(transform.apply(camera)-world, axis=1))),
                 fit_method='three_reference_rgbd_rigid_alignment', fit_valid=bool(rms <= max_rms_px),
                 accepted=bool(rms <= max_rms_px))
 
 
-def align_camera(raw, solution, intrinsics, max_rms_px=1.):
+def align_camera(raw, solution, intrinsics, max_rms_px=CAMERA_RMS_LIMIT_PX):
     if not np.isfinite(max_rms_px) or max_rms_px <= 0:
         raise ValueError('Camera RMS limit must be a finite positive number')
     if len(raw['samples']) != len(solution['samples']):
         raise ValueError('Camera/Lighthouse sample counts do not match')
-    world = np.array([s['position_m'] for s in solution['samples']], float)
-    if world.shape != (len(raw['samples']), 3) or not np.all(np.isfinite(world)):
+    # Only the three floor references are camera-paired; space samples are Lighthouse only.
+    references = dict(raw, samples=[s for s in raw['samples'] if 'camera' in s])
+    roles = [s['role'] for s in references['samples']]
+    if roles != ['origin', 'x', 'xy'] or [s['role'] for s in raw['samples'][:3]] != roles:
+        raise ValueError('Camera alignment needs the origin, X and XY placements first')
+    if [s['role'] for s in solution['samples'][:3]] != ['origin', 'x-axis', 'xy-plane']:
+        raise ValueError('Lighthouse solver returned the reference poses out of order')
+    world = np.array([s['position_m'] for s in solution['samples'][:3]], float)
+    if world.shape != (3, 3) or not np.all(np.isfinite(world)):
         raise ValueError('Lighthouse solver did not produce every required pose')
-    return align_reference_camera(raw, world, intrinsics, max_rms_px=max_rms_px)
+    return align_reference_camera(references, world, intrinsics, max_rms_px=max_rms_px)
 
 
 def build_rig(floor, camera_result, stations, hardware):
@@ -290,13 +418,14 @@ def save_completed_setup(root, rig, solution, alignment, intrinsics, profile,
 def run(args, ask=input):
     from ..hardware import connect
     from cflib.crazyflie.mem import LighthouseMemHelper
-    max_rms_px = getattr(args, 'max_camera_rms_px', 1.)
+    max_rms_px = getattr(args, 'max_camera_rms_px', None)
+    max_rms_px = CAMERA_RMS_LIMIT_PX if max_rms_px is None else max_rms_px
     if not np.isfinite(max_rms_px) or max_rms_px <= 0:
         raise ValueError('--max-camera-rms-px must be a finite positive number')
     target = Path(args.out)
     root = target.with_suffix('.setup') if target.suffix == '.json' else target
     root = artifacts.session(root, 'setup', {})
-    artifacts.report(root, camera_reprojection_limit_px=max_rms_px, camera_rms_limit_overridden=max_rms_px != 1.)
+    artifacts.report(root, camera_reprojection_limit_px=max_rms_px, camera_rms_limit_overridden=max_rms_px != CAMERA_RMS_LIMIT_PX)
     camera = None
     try:
         detector = NanoDetector(args.detector_model)
@@ -328,10 +457,24 @@ def run(args, ask=input):
             lh_out = artifacts.session(root/'lighthouse', 'lighthouse', {})
             artifacts.write(lh_out/'factory-calibration.json', dict(version=1, stations=factory))
             raw = collect_samples(cf, camera, detector, stations, lh_out, ask)
+            if not getattr(args, 'reference_only', False):
+                raw['reference_only'] = False
+                trigger = (enter_trigger(ask) if getattr(args, 'sample_trigger', 'motion') == 'enter'
+                           else motion_trigger(cf))
+                try:
+                    collect_space_samples(cf, stations, lh_out, raw, trigger)
+                finally:
+                    getattr(trigger, 'stop', lambda: None)()
             solution = lighthouse.solve_bounded(lh_out/'samples.json', lh_out)
             artifacts.report(lh_out, solution=solution, station_status=status)
             if not solution.get('fit_valid'):
                 raise ValueError('Lighthouse estimation did not converge with valid reference placements; repeat setup')
+            if not solution['reference_only']:
+                stats = solution.get('verification_stats') or {}
+                print(f'Lighthouse checks: max error {(solution["max_verification_error_m"] or float("nan"))*1000:.2f} mm, '
+                      f'mean {(stats.get("mean") or float("nan"))*1000:.2f} mm; coverage '
+                      f'{"ok" if solution["coverage_ok"] else "too narrow (spread checks at least 20 cm apart and 10 cm in height)"}.',
+                      flush=True)
             alignment = align_camera(raw, solution, camera.intrinsics, max_rms_px=max_rms_px)
             camera_out = artifacts.session(root/'camera', 'camera', {})
             artifacts.report(camera_out, **dict(alignment, accepted=False))

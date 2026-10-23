@@ -12,7 +12,7 @@ from scipy.spatial.transform import Rotation
 
 from flight.calibration import artifacts, camera, cli, hover, lighthouse, rig, vision, layout
 from flight.clock import ManualClock
-from flight.frames import Pose, xyzw_to_wxyz
+from flight.frames import Pose, wxyz_to_xyzw, xyzw_to_wxyz
 from flight import fake, preflight
 
 
@@ -616,3 +616,512 @@ def test_session_replaces_previous_session_but_not_other_directories(tmp_path):
     with pytest.raises(ValueError, match='not a previous'):
         artifacts.session(other, 'setup', {})
     assert (other / 'data.txt').read_text() == 'keep'
+
+
+def wide_lens(intrinsics):
+    # The view fixture's lens frames the tags, not a drone hovering over the outer ones.
+    return dict(intrinsics, matrix=[[450, 0, 640], [0, 450, 360], [0, 0, 1]])
+
+
+def test_centre_route_hovers_deck_over_every_tag_centre(survey, view, tmp_path):
+    from flight.calibration import visits
+    transform, intrinsics, _ = view
+    intrinsics = wide_lens(intrinsics)
+    calibration = dict(T_lighthouse_camera=transform.to_dict())
+    plan = visits.centre_route(survey, calibration, intrinsics, demo=True)
+    tags = [s for s in plan['segments'] if 'tag_id' in s]
+    assert sorted(s['tag_id'] for s in tags) == [t['id'] for t in survey['tags']]
+    by_id = {t['id']: t for t in survey['tags']}
+    for segment in tags:
+        np.testing.assert_allclose(segment['target_m'][:2], by_id[segment['tag_id']]['pose']['pos'][:2], atol=1e-12)
+        assert segment['target_body_m'][2] == pytest.approx(hover.hover_height(survey))
+    home = np.array(survey['home']['pos'][:2])
+    nearest = min(survey['tags'], key=lambda t: np.linalg.norm(np.array(t['pose']['pos'][:2])-home))
+    assert tags[0]['tag_id'] == nearest['id']
+    assert plan['kind'] == 'approach-accuracy' and plan['centre_source'] == 'rig'
+    assert plan['duration_s'] <= 180
+    surveyed = {0: [.01, -.02, -.06]}
+    moved = visits.centre_route(survey, calibration, intrinsics, centres=surveyed, demo=True)
+    segment = next(s for s in moved['segments'] if s.get('tag_id') == 0)
+    np.testing.assert_allclose(segment['target_m'][:2], [.01, -.02])
+    assert moved['centre_source'] == 'survey'
+    visits.preview(plan, tmp_path/'preview.png')
+    assert (tmp_path/'preview.png').stat().st_size > 0
+    with pytest.raises(ValueError, match='dwell'):
+        visits.centre_route(survey, calibration, intrinsics, dwell_s=0.)
+
+
+def test_tag_survey_recovers_centres_and_flags_disagreement(survey, view):
+    from flight.calibration import accuracy
+    transform, intrinsics, observations = view
+    result = accuracy.survey_tags(observations, transform.to_dict(), intrinsics, survey)
+    for tag, rig_tag in zip(result['tags'], survey['tags']):
+        np.testing.assert_allclose(tag['centre_m'], rig_tag['pose']['pos'], atol=1e-6)
+    assert result['max_delta_xy_m'] < 1e-6 and result['warnings'] == []
+    shifted = {**observations, 4: observations[4]+[20., 0.]}
+    result = accuracy.survey_tags(shifted, transform.to_dict(), intrinsics, survey)
+    assert [w.startswith('Tag 4') for w in result['warnings']] == [True]
+    with pytest.raises(ValueError, match='missing \\[5\\]'):
+        accuracy.survey_tags({k: v for k, v in observations.items() if k != 5}, transform.to_dict(), intrinsics, survey)
+
+
+def camera_event(t, xy, height=.2, origin=(.45, .35, 1.5), depth_noise=0.):
+    deck, origin = np.array([*xy, height]), np.array(origin)
+    direction = (deck-origin)/np.linalg.norm(deck-origin)
+    measured = deck+direction*depth_noise
+    return dict(event='camera', t=t, time=t, alignment_rms_px=.4, drone_world_m=measured.tolist(),
+                drone_ray_world_m=dict(origin=origin.tolist(), direction=direction.tolist()))
+
+
+def test_deck_xy_uses_ray_at_median_depth_height():
+    from flight.calibration import accuracy
+    # Off-axis deck: depth noise along the ray moves the raw depth point sideways.
+    frames = [camera_event(i, [1.0, .7], depth_noise=n) for i, n in enumerate([-.03, 0., 0., .005, .01])]
+    result = accuracy.deck_xy(frames)
+    np.testing.assert_allclose(result['xy_m'], [1.0, .7], atol=1e-12)
+    assert result['deck_height_m'] == pytest.approx(.2)
+    assert np.linalg.norm(np.subtract(result['depth_xy_m'], [1.0, .7])) > 1e-3
+    assert result['frames'] == 5
+
+
+def telemetry_event(t, xy):
+    return dict(event='telemetry', t=t, host_time=t,
+                values={'stateEstimate.x': xy[0], 'stateEstimate.y': xy[1], 'stateEstimate.z': .2})
+
+
+def target_event(t, name, target, tag=None, duration=2., dwell=5.):
+    event = dict(event='target', t=t, name=name, target_m=[*target, .2], duration_s=duration, dwell_s=dwell)
+    return event if tag is None else dict(event, tag_id=tag)
+
+
+def synthetic_trial_events():
+    return [target_event(0., 'takeoff', [0, 0], dwell=2.),
+            telemetry_event(4., [1., 1.]),
+            target_event(5., 'tag-0', [0, 0], tag=0),          # settled window 7.5–12.5 s
+            telemetry_event(8., [.01, 0.]), telemetry_event(11., [.01, .02]),
+            camera_event(8., [.03, -.04]), camera_event(10., [.03, -.04]),
+            camera_event(13.5, [.5, .5]),                       # transit: outside the window
+            target_event(13., 'tag-1', [1, 0], tag=1),         # settled window 15.5–20.5 s
+            telemetry_event(16., [1., 0.]),
+            target_event(21., 'return', [0, 0], dwell=0.),
+            target_event(25., 'land', [0, 0], dwell=0.)]
+
+
+SYNTHETIC_CENTRES = {0: [0., 0., -.06], 1: [1., 0., -.06]}
+
+
+def test_approach_errors_from_settled_dwells():
+    from flight.calibration import accuracy
+    rows = accuracy.approaches(synthetic_trial_events(), SYNTHETIC_CENTRES, trial=1)
+    assert [r['tag_id'] for r in rows] == [0, 1]
+    first, second = rows
+    np.testing.assert_allclose(first['control_error_xy_m'], [.01, .01])
+    np.testing.assert_allclose(first['positioning_error_xy_m'], [.03, -.04], atol=1e-12)
+    assert first['positioning_error_m'] == pytest.approx(.05)
+    assert (first['lighthouse_samples'], first['camera_frames']) == (2, 2)
+    assert second['control_error_m'] == pytest.approx(0.)
+    assert second['positioning_error_xy_m'] is None and second['camera_frames'] == 0
+    # A flight that stops during a dwell contributes no approach for it.
+    assert accuracy.approaches(synthetic_trial_events()[:6], SYNTHETIC_CENTRES, trial=1) == []
+
+
+def test_summary_statistics_match_hand_calculation():
+    from flight.calibration import accuracy
+    rows = [dict(tag_id=0, control_error_xy_m=[.03, .04], positioning_error_xy_m=None),
+            dict(tag_id=1, control_error_xy_m=[0., 0.], positioning_error_xy_m=[.01, 0.])]
+    summary = accuracy.summarize(rows)
+    control = summary['control']['overall']
+    assert control['n'] == 2
+    assert control['mean_error_m'] == pytest.approx(.025)
+    assert control['rmse_m'] == pytest.approx(math.sqrt(.0025/2))
+    assert control['std_error_m'] == pytest.approx(np.std([.05, 0.], ddof=1))
+    np.testing.assert_allclose(control['bias_xy_m'], [.015, .02])
+    assert summary['control']['per_tag']['0']['mean_error_m'] == pytest.approx(.05)
+    assert summary['positioning']['missing'] == 1
+    assert summary['positioning']['per_tag']['0'] == dict(n=0)
+    assert summary['positioning']['overall']['max_error_m'] == pytest.approx(.01)
+
+
+def synthetic_session(root):
+    import json
+    root.mkdir()
+    artifacts.write(root/'session.json', dict(version=1, kind='approach-accuracy', dry_run=False, trials=[
+        dict(index=1, dir='trial-01', accepted=True), dict(index=2, dir='trial-02', accepted=False)]))
+    artifacts.write(root/'survey.json', dict(version=1, kind='tag-survey', registration=None,
+        tags=[dict(id=k, centre_m=v) for k, v in SYNTHETIC_CENTRES.items()]))
+    (root/'trial-01').mkdir()
+    (root/'trial-01'/'events.jsonl').write_text(''.join(json.dumps(e)+'\n' for e in synthetic_trial_events()))
+    (root/'trial-02').mkdir()  # failed trial: no events, excluded
+    return root
+
+
+def test_metrics_and_plot_regenerate_offline(tmp_path):
+    pytest.importorskip('matplotlib')
+    from flight.calibration import accuracy
+    root = synthetic_session(tmp_path/'session')
+    metrics = accuracy.write_metrics(root)
+    assert metrics['trials_included'] == ['trial-01'] and metrics['trials_excluded'] == ['trial-02']
+    assert artifacts.read(root/'metrics.json') == metrics
+    assert len(metrics['approaches']) == 2
+    assert (root/'approach-errors.png').stat().st_size > 0
+    (root/'metrics.json').unlink()
+    (root/'approach-errors.png').unlink()
+    assert cli.main(['approach-metrics', str(root)]) == 0
+    assert artifacts.read(root/'metrics.json') == metrics
+    assert (root/'approach-errors.png').exists()
+
+
+def calibrated_files(tmp_path, survey, view):
+    transform, intrinsics, _ = view
+    lh, ca = accepted_sessions(tmp_path, survey)
+    artifacts.report(ca, T_lighthouse_camera=transform.to_dict(), profile=intrinsics['profile'])
+    artifacts.write(ca/'intrinsics.json', wide_lens(intrinsics))
+    artifacts.write(tmp_path/'rig.json', survey)
+    return ['--rig', str(tmp_path/'rig.json'), '--lighthouse', str(lh), '--calibration', str(ca)]
+
+
+def test_approach_accuracy_dry_run_opens_no_devices_and_never_overwrites(tmp_path, survey, view):
+    files = calibrated_files(tmp_path, survey, view)
+    out = tmp_path/'exp3'
+    with patch('flight.calibration.camera.open_camera', side_effect=AssertionError('camera opened')):
+        assert cli.main(['approach-accuracy', *files, '--demo', '--out', str(out)]) == 0
+    plan = artifacts.read(out/'preview'/'route.json')
+    assert plan['mode'] == 'over_centre' and plan['centre_source'] == 'rig'
+    assert (out/'preview'/'route-preview.png').exists()
+    assert artifacts.read(out/'session.json')['dry_run'] is True
+    (out/'keep.txt').write_text('keep')
+    assert cli.main(['approach-accuracy', *files, '--demo', '--out', str(out)]) == 1
+    assert (out/'keep.txt').read_text() == 'keep'
+    assert cli.main(['approach-accuracy', *files, '--demo']) == 1  # needs --out or --resume
+
+
+def test_resume_appends_trials_without_touching_earlier_runs(tmp_path, survey):
+    from flight.calibration import accuracy
+    root = tmp_path/'exp3'
+    root.mkdir()
+    settings = dict(demo=True, controller='pid', dwell_s=5.)
+    artifacts.write(root/'session.json', dict(version=1, kind='approach-accuracy', dry_run=False,
+        rig_fingerprint=artifacts.fingerprint(survey), settings=settings,
+        trials=[dict(index=i, dir=f'trial-{i:02d}', accepted=True) for i in (1, 2)]))
+    artifacts.write(root/'survey.json', dict(version=1, registration=dict(T_lighthouse_camera='fixed'),
+        tags=[dict(id=t['id'], centre_m=t['pose']['pos']) for t in survey['tags']]))
+    for i in (1, 2):
+        (root/f'trial-{i:02d}').mkdir()
+        (root/f'trial-{i:02d}'/'marker').write_text(str(i))
+    flown = []
+
+    def fake_run(args, rig, ask):
+        flown.append(args)
+        output = artifacts.session(args.out, args.command, rig)
+        artifacts.report(output, accepted=True, flight_complete=True)
+        return output
+
+    args = SimpleNamespace(command='approach-accuracy', trials=3, arm=True, check_only=False, camera_check_only=False,
+                           resume=str(root), out=None, demo=True, controller=None, dwell_s=5., save_metrics=False)
+    with patch.object(hover, 'run', fake_run):
+        assert accuracy.run_session(args, survey, ask=lambda _: '') == root
+    assert [Path(a.out).name for a in flown] == ['trial-03']
+    assert not hasattr(flown[0], 'fixed_registration')
+    assert set(flown[0].tag_centres) == {t['id'] for t in survey['tags']}
+    assert [(root/f'trial-{i:02d}'/'marker').read_text() for i in (1, 2)] == ['1', '2']
+    assert [t['dir'] for t in artifacts.read(root/'session.json')['trials']] == ['trial-01', 'trial-02', 'trial-03']
+    with pytest.raises(ValueError, match='settings'):
+        accuracy.run_session(SimpleNamespace(**dict(vars(args), demo=False)), survey)
+
+
+def test_recording_monitor_logs_visual_disagreement_without_aborting():
+    import time
+    monitor = object.__new__(hover.CameraMonitor)
+    monitor.queue = Queue()
+    monitor.max_age_s = 1.
+    monitor.demo = False
+    monitor.in_flight = True
+    monitor.last_warning = None
+    monitor.position_history = hover.deque()
+    events = []
+    monitor.emit = events.append
+    monitor.latest = dict(time=time.monotonic(), drone={}, drone_world_m=[.1, 0., .2])
+    monitor.record_only = True
+    monitor.check(np.array([0., 0., .2]))
+    assert events[-1]['event'] == 'visual_tracking_error' and events[-1]['error_m'] == pytest.approx(.1)
+    monitor.latest = dict(time=time.monotonic(), error='Drone not confidently visible')
+    monitor.check(np.array([0., 0., .2]))
+    assert events[-1]['event'] == 'vision_warning'
+    monitor.record_only = False
+    monitor.latest = dict(time=time.monotonic(), drone={}, drone_world_m=[.1, 0., .2])
+    with pytest.raises(RuntimeError, match='5 cm'):
+        monitor.check(np.array([0., 0., .2]))
+
+
+def test_setup_camera_rms_limit_defaults_to_three_pixels():
+    from flight.calibration import setup
+    assert setup.CAMERA_RMS_LIMIT_PX == 3.
+    assert cli.parser().parse_args(['setup']).max_camera_rms_px is None
+    assert cli.main(['setup', '--advanced', '--max-camera-rms-px', '2']) == 1
+
+
+def test_session_target_defaults_to_five_and_extends_without_devices(tmp_path, survey, view):
+    files = calibrated_files(tmp_path, survey, view)
+    out = tmp_path/'exp3'
+    assert cli.main(['approach-accuracy', *files, '--demo', '--out', str(out)]) == 0
+    assert artifacts.read(out/'session.json')['target_trials'] == 5
+    session = artifacts.read(out/'session.json')
+    artifacts.write(out/'session.json', dict(session, dry_run=False))
+    with patch('flight.calibration.camera.open_camera', side_effect=AssertionError('camera opened')), \
+            patch('flight.hardware.connect', side_effect=AssertionError('radio opened')):
+        assert cli.main(['approach-accuracy', '--resume', str(out), '--trials', '20']) == 0
+    assert artifacts.read(out/'session.json')['target_trials'] == 20
+    assert cli.main(['approach-accuracy', '--resume', str(out), '--trials', '0']) == 1
+
+
+def still_sample(offset=0.):
+    angles = {str(k): (np.full((4, 2), .1)+offset).tolist() for k in (0, 1)}
+    packets = [{k: (np.asarray(v)+(offset*i if offset else 0.)).tolist() for k, v in angles.items()} for i in range(50)]
+    return dict(angles=angles, packets=packets, timestamp=0.)
+
+
+def test_space_samples_are_lighthouse_only_and_reject_motion(tmp_path):
+    from flight.calibration import setup
+    raw = dict(version=1, base_stations=[0, 1], samples=[dict(role=r) for r in ('origin', 'x', 'xy')], reference_only=False)
+    prompts = []
+    results = iter([TimeoutError('no pairs'), still_sample(), still_sample(.001), still_sample(), still_sample()])
+
+    def fake_collect(*_args, **_kwargs):
+        result = next(results)
+        if isinstance(result, Exception):
+            raise result
+        return result
+    with patch.object(setup.lighthouse, 'collect', fake_collect):
+        setup.collect_space_samples(None, [0, 1], tmp_path, raw, lambda *a: prompts.append(a), space=2, checks=1)
+    assert [s['role'] for s in raw['samples'][3:]] == ['xyz', 'xyz', 'verification']
+    assert not any('camera' in s for s in raw['samples'][3:])
+    # Timeout and motion each repeat the same prompt.
+    assert prompts == [('Space sample', 1, 2), ('Space sample', 1, 2), ('Space sample', 2, 2),
+                       ('Space sample', 2, 2), ('Check', 1, 1)]
+    assert artifacts.read(tmp_path/'samples.json')['samples'][-1]['role'] == 'verification'
+    assert setup.held_still(still_sample(.001))[0] is False
+
+
+def test_motion_trigger_needs_a_move_then_a_still_hold():
+    from flight.calibration import setup
+    detector = setup.StillAfterMove()
+    # Held still from the start: no sample, however long.
+    assert not any(detector.update(t/20, 2.) for t in range(100))
+    # Hand tremor below the move threshold does not count as a move either.
+    assert not any(detector.update(5+t/20, 30.) for t in range(20))
+    detector.update(6., 120.)                      # carried to a new spot
+    assert not detector.update(6.1, 3.)
+    assert not detector.update(7., 25.)             # wobble restarts the hold
+    assert not detector.update(7.1, 3.)
+    assert detector.update(8.6, 3.)                 # 1.5 s still after the move
+    assert not detector.update(10., 3.)             # next sample needs a new move
+
+
+def test_motion_trigger_records_after_logged_move_and_hold():
+    from contextlib import contextmanager
+    from queue import Empty
+    from flight.calibration import setup
+    clock = ManualClock(100.)
+    closed = []
+
+    class ScriptedGyro:
+        """Nothing queued before the prompt; then one move followed by a still hold."""
+        def __init__(self):
+            self.feed = [120.]+[2.]*40
+        def get_nowait(self):
+            raise Empty
+        def get(self, timeout):
+            if not self.feed:
+                raise Empty
+            clock.sleep(.05)
+            return clock.time(), {'gyro.x': self.feed.pop(0), 'gyro.y': 0., 'gyro.z': 0.}
+
+    gyro = ScriptedGyro()
+
+    @contextmanager
+    def fake_samples(*_args, **_kwargs):
+        try:
+            yield gyro
+        finally:
+            closed.append(True)
+    cf = SimpleNamespace(is_connected=lambda: True)
+    with patch('flight.preflight.samples', fake_samples), patch('builtins.print'):
+        wait = setup.motion_trigger(cf, LogConfig=object, clock=clock)
+        wait('Space sample', 1, 8)
+    assert 0 < len(gyro.feed) < 40   # returned after about 1.5 s of stillness, not at the end of the feed
+    wait.stop()
+    assert closed == [True]
+
+
+def test_camera_alignment_uses_floor_references_with_space_samples(view):
+    from flight.calibration import setup
+    transform, intrinsics, _ = view
+    raw = synthetic_lighthouse_samples()
+    solution = lighthouse.solve(raw)
+    assert not solution['reference_only'] and solution['fit_valid']
+    inverse = transform.inverse()
+    rv = Rotation.from_quat(wxyz_to_xyzw(inverse.quat)).as_rotvec()
+    for record, solved in zip(raw['samples'][:3], solution['samples'][:3]):
+        world = np.asarray(solved['position_m'])
+        record['camera'] = dict(point_camera_m=inverse.apply(world).tolist(),
+                                center_px=camera.project_points(world[None], rv, np.array(inverse.pos), intrinsics)[0].tolist())
+    alignment = setup.align_camera(raw, solution, intrinsics)
+    assert alignment['fit_valid'] and alignment['reprojection_rms_px'] < 1e-6
+    np.testing.assert_allclose(Pose.from_dict(alignment['T_lighthouse_camera']).pos, transform.pos, atol=1e-6)
+
+
+def test_saturated_and_missing_depth_are_invalid():
+    raw = np.array([[0, 1530, 65535]], np.uint16)
+    depth = camera.depth_metres(raw, .001)
+    assert np.isnan(depth[0, 0]) and np.isnan(depth[0, 2])
+    assert depth[0, 1] == pytest.approx(1.53)
+
+
+def test_lighthouse_solver_gets_more_than_cflib_default_evaluations():
+    import scipy.optimize
+    from cflib.localization import lighthouse_geometry_solver as geometry_solver
+    budgets, original = [], scipy.optimize.least_squares
+    def recording(*args, **kwargs):
+        budgets.append(kwargs['max_nfev'])
+        return original(*args, **kwargs)
+    with patch.object(scipy.optimize, 'least_squares', recording):
+        assert lighthouse.solve(synthetic_lighthouse_samples())['converged']
+    assert lighthouse.SOLVER_EVALUATIONS in budgets and 100 not in budgets  # 10 is a separate cflib step
+    assert geometry_solver.SolverData().max_nr_iter == 100  # cflib default restored
+
+
+def preflight_monitor(statuses):
+    import time
+    monitor = object.__new__(hover.CameraMonitor)
+    queue = Queue()
+    now = time.monotonic()
+    for status in statuses:
+        queue.put(dict(status, time=now))
+    monitor.process = SimpleNamespace(start=lambda: None, join=lambda timeout: None, is_alive=lambda: False)
+    monitor.stop = SimpleNamespace(set=lambda: None)
+    monitor.queue = SimpleNamespace(get=queue.get, get_nowait=queue.get_nowait, close=lambda: None)
+    monitor.max_age_s, monitor.settle_s = 30., .5
+    monitor.demo = monitor.record_only = monitor.in_flight = False
+    monitor.last_warning, monitor.position_history = None, hover.deque()
+    monitor.emit = lambda _: None
+    return monitor
+
+
+def test_preflight_camera_check_tolerates_one_disturbed_frame():
+    mismatch = dict(error='Camera/tag projection mismatch (2.02 px)')
+    monitor = preflight_monitor([mismatch, dict(alignment_rms_px=.8)])
+    assert monitor.__enter__() is monitor
+    with pytest.raises(RuntimeError, match='persisted'):
+        preflight_monitor([mismatch]).__enter__()
+
+
+def test_frame_refit_follows_a_shifted_camera_with_one_tag_covered(survey, view):
+    transform, intrinsics, _ = view
+    # The cage (and camera) shifted 2 cm and rotated 0.5 degree after the session started.
+    moved = Pose(tuple(np.add(transform.pos, [.02, -.01, 0.])), tuple(xyzw_to_wxyz(
+        (Rotation.from_quat(wxyz_to_xyzw(transform.quat))*Rotation.from_euler('z', .5, degrees=True)).as_quat())))
+    inverse = moved.inverse()
+    rv = Rotation.from_quat(wxyz_to_xyzw(inverse.quat)).as_rotvec()
+    found = {t['id']: camera.project_points(rig.corners(t), rv, np.array(inverse.pos), intrinsics)
+             for t in survey['tags'] if t['id'] != 3}   # drone hovering over tag 3
+    pose, info = hover.refit_frame(survey, found, intrinsics, transform, transform)
+    np.testing.assert_allclose(pose.pos, moved.pos, atol=1e-6)
+    assert info['camera_shift_m'] == pytest.approx(math.hypot(.02, .01), abs=1e-6)
+    assert 3 not in info['tags'] and info['rms_px'] < 1e-4
+    kept, info = hover.refit_frame(survey, {k: found[k] for k in (0, 1)}, intrinsics, transform, transform)
+    assert kept == transform and 'kept previous camera pose' in info['warning']
+
+
+def test_launch_offset_compares_lighthouse_and_camera_pad_positions():
+    from flight.calibration import accuracy
+    events = [telemetry_event(-2., [.012, -.004]), telemetry_event(-1., [.014, -.006]),
+              camera_event(-1.5, [0., 0.]), camera_event(-.5, [0., 0.]),
+              target_event(0., 'takeoff', [0, 0], dwell=2.), camera_event(3., [.5, .5])]
+    result = accuracy.launch_offset(events, trial=4)
+    np.testing.assert_allclose(result['offset_xy_m'], [.013, -.005], atol=1e-12)
+    assert result['trial'] == 4 and result['camera_frames'] == 2
+
+
+def test_preflight_reports_low_battery_before_waiting_for_lighthouse():
+    from contextlib import contextmanager
+    cf = SimpleNamespace(param=SimpleNamespace(toc=SimpleNamespace(get_element_by_complete_name=lambda _: object()),
+                                               get_value=lambda _: '1'))
+    scf = SimpleNamespace(cf=cf, is_params_updated=lambda: True)
+
+    @contextmanager
+    def no_log(*_args, **_kwargs):
+        yield None
+    with patch.object(preflight, 'set_parameter'), patch.object(preflight, 'samples', no_log), \
+            patch.object(preflight, 'battery', return_value=3.72), \
+            patch.object(preflight, 'wait_for_position', side_effect=AssertionError('waited for Lighthouse')):
+        with pytest.raises(preflight.PreflightError, match='3.72 V .* swap the battery'):
+            preflight.run_preflight(scf, dict(settings={}), None, ManualClock())
+
+
+def test_station_consistency_flags_a_moved_station():
+    raw = synthetic_lighthouse_samples()
+    geometry = lighthouse.solve(raw)['geometry']
+    for record in raw['samples']:
+        result = lighthouse.station_consistency(record['angles'], geometry)
+        assert result['consistent'] and result['worst_rms_mrad'] < .05
+    resting = raw['samples'][0]['angles']
+    np.testing.assert_allclose(lighthouse.station_consistency(resting, geometry)['position_m'], [0, 0, 0], atol=1e-4)
+    moved = copy.deepcopy(geometry)
+    moved['1']['rotation'] = (Rotation.from_euler('z', .5, degrees=True).as_matrix() @ np.asarray(moved['1']['rotation'])).tolist()
+    result = lighthouse.station_consistency(resting, moved)
+    assert not result['consistent'] and result['worst_rms_mrad'] > 2
+
+
+def test_flight_stops_before_preflight_when_stations_moved(tmp_path, survey):
+    raw = synthetic_lighthouse_samples()
+    geometry = lighthouse.solve(raw)['geometry']
+    moved = copy.deepcopy(geometry)
+    moved['0']['origin'] = (np.asarray(moved['0']['origin'])+[.05, 0, 0]).tolist()
+    events = []
+    sample = dict(angles=raw['samples'][0]['angles'], packets=[], timestamp=0.)
+    with patch.object(lighthouse, 'collect', return_value=sample):
+        assert hover.check_stations(None, survey, geometry, [0, 0, 0], tmp_path, events.append)['consistent']
+        with pytest.raises(RuntimeError, match='Re-run setup'):
+            hover.check_stations(None, survey, moved, [0, 0, 0], tmp_path, events.append)
+    assert [e['event'] for e in events] == ['station_check', 'station_check']
+
+
+def test_resume_on_a_new_calibration_keeps_each_trials_own_survey(tmp_path, survey):
+    import json
+    from flight.calibration import accuracy
+    root = synthetic_session(tmp_path/'exp3')
+    session = artifacts.read(root/'session.json')
+    session.update(rig_fingerprint=artifacts.fingerprint(survey), settings=dict(demo=True, controller='pid', dwell_s=5.),
+                   target_trials=2)
+    artifacts.write(root/'session.json', session)
+    artifacts.write(root/'rig.json', survey)
+    recalibrated = copy.deepcopy(survey)
+    recalibrated['tags'][0]['pose']['pos'][0] += .004   # same tags, new Lighthouse solution
+    # The new calibration surveys tag 0 2 cm along +X.
+    new_survey = dict(version=1, kind='tag-survey', warnings=[], registration=None,
+                      tags=[dict(id=0, centre_m=[.02, 0., -.06]), dict(id=1, centre_m=[1., 0., -.06])])
+
+    def fake_run(args, rig, ask):
+        output = artifacts.session(args.out, args.command, rig)
+        (output/'events.jsonl').write_text(''.join(json.dumps(e)+'\n' for e in synthetic_trial_events()))
+        artifacts.report(output, accepted=True, flight_complete=True)
+        return output
+    args = SimpleNamespace(command='approach-accuracy', trials=None, arm=True, check_only=False, camera_check_only=False,
+                           resume=str(root), out=None, demo=True, controller=None, dwell_s=5., save_metrics=False,
+                           setup='runs/setup-new')
+    with patch.object(accuracy, 'capture_survey', return_value=new_survey), patch.object(hover, 'run', fake_run), \
+            patch('builtins.print'):
+        accuracy.run_session(args, recalibrated, ask=lambda _: '')
+    session = artifacts.read(root/'session.json')
+    assert [c['index'] for c in session['calibrations']] == [1, 2]
+    assert session['calibrations'][1]['from_trial'] == 3 and session['trials'][-1]['calibration'] == 2
+    assert (root/'survey-02.json').exists() and (root/'rig-02.json').exists()
+    metrics = accuracy.write_metrics(root)
+    by_trial = {(r['trial'], r['tag_id']): r for r in metrics['approaches']}
+    # Same flight data, so tag 0's positioning error differs by exactly the 2 cm survey change.
+    assert by_trial[(3, 0)]['positioning_error_xy_m'][0] == pytest.approx(by_trial[(1, 0)]['positioning_error_xy_m'][0]-.02)
+    assert set(metrics['summary_by_calibration']) == {'1', '2'}
+    other = copy.deepcopy(survey)
+    other['tags'] = other['tags'][:5]
+    with pytest.raises(ValueError, match='different tags'):
+        accuracy.run_session(args, other, ask=lambda _: '')
