@@ -1,3 +1,19 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:ff12bbcd1b90a66d006ee7706f5975b9e0acb2638301c0829951df9b94c5f64b
-size 644
+{
+  "version": 1,
+  "kind": "approach-accuracy",
+  "accepted": false,
+  "created_utc": "2026-10-22T21:19:10.100704+00:00",
+  "rig_fingerprint": "2f3b21636bb34275417c1f5a7fab83b45f864097961bf4c4fe8a7ed283c45879",
+  "demo": true,
+  "visual_position_advisory": true,
+  "controller": "pid",
+  "flight_battery_policy": {
+    "low_v": 3.35,
+    "critical_v": 3.1,
+    "low_duration_s": 1.0
+  },
+  "camera_reprojection_rms_px": 1.2845591924285,
+  "camera_reprojection_limit_px": 3.0,
+  "camera_observation_max_age_s": 1.0,
+  "reason": "Camera/tag projection mismatch (2.017274652879528 px); use --demo to refresh the camera pose against fixed tags"
+}

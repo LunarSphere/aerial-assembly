@@ -1,3 +1,41 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:db14faa7b073e53c2e896c0a27a6c4323b979073270855b7aa7cde6a686aa9e3
-size 1047
+{
+  "version": 1,
+  "kind": "approach-accuracy",
+  "accepted": true,
+  "created_utc": "2026-10-22T21:25:45.769436+00:00",
+  "rig_fingerprint": "2f3b21636bb34275417c1f5a7fab83b45f864097961bf4c4fe8a7ed283c45879",
+  "demo": true,
+  "visual_position_advisory": true,
+  "controller": "pid",
+  "flight_battery_policy": {
+    "low_v": 3.35,
+    "critical_v": 3.1,
+    "low_duration_s": 1.0
+  },
+  "camera_reprojection_rms_px": 1.2845591924285,
+  "camera_reprojection_limit_px": 3.0,
+  "camera_observation_max_age_s": 1.0,
+  "geometry_uploaded": true,
+  "geometry_readback_verified": true,
+  "lighthouse_upload": {
+    "supported_station_slots": 4,
+    "written_station_ids": [
+      0,
+      1
+    ],
+    "persisted": true,
+    "readback_verified": true
+  },
+  "preflight": {
+    "position_m": [
+      -0.0029259704635478554,
+      0.007114746479783207,
+      -7.802225736668334e-05
+    ],
+    "vbat_V": 3.9008798599243164,
+    "controller": 1
+  },
+  "flight_complete": true,
+  "operator_observation": "yes",
+  "independent_drone_pose_measured": false
+}
