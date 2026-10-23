@@ -17,7 +17,7 @@ Model weights and run archives are git-ignored and stay local.
 ## Quick start
 
 ```sh
-flight-cal setup                                   # four placements; writes runs/setup
+flight-cal setup                                   # four placements + 13 hand-held samples; writes runs/setup
 flight-cal hover-check --setup runs/setup --demo           # dry run: route only, no devices opened
 flight-cal hover-check --setup runs/setup --demo --check-only   # camera + radio preflight, never arms
 flight-cal hover-check --setup runs/setup --demo --arm     # supervised 10 s hover
@@ -50,10 +50,21 @@ The command asks **four questions**, each answered with Enter:
    This defines the XY plane, as in cfclient.
 4. Return it to the original launch support and heading.
 
-There are no extra geometry or verification samples. Camera registration is a rigid fit of the
-three depth-derived reference points to their Lighthouse positions, so setup requires the D455
-in RGB-D mode. Reprojection RMS must be at most 1 px; set `--max-camera-rms-px 2.0` (or higher)
-to accept a looser fit, which is recorded in the reports. The return to launch must be within
+Between steps 3 and 4, setup records **8 space samples and then 5 checks** with the drone held
+by hand. These refine where the base stations are, which three floor placements alone pin down
+poorly (the two stations then disagree by 1–3 cm away from the placements). They use
+Lighthouse only, never the camera, so hands may be in view. For each one, carry the drone to a new
+spot and hold it still for about 2 seconds; the drone's gyro starts the sample, and the terminal
+prints a reminder every 5 seconds while it waits (`--sample-trigger enter` uses Enter instead). A sample is retried if the drone moved during it. Cover every tag, including the far
+corners, at hover height (20–40 cm above the tags) as well as near the floor; put the checks at
+new spots. Setup prints the check error and coverage (`lighthouse/report.json`).
+`--reference-only` skips these samples.
+
+Camera registration is a rigid fit of the three depth-derived floor placements to their
+Lighthouse positions, so setup requires the D455
+in RGB-D mode. Reprojection RMS must be at most 3 px (fits on this rig land at 2–2.5 px; `--demo`
+flights refit the pose to the fixed tags, typically to about 0.5 px). `--max-camera-rms-px` sets a
+different limit, which is recorded in the reports. The return to launch must be within
 2 cm of the origin observation.
 
 Setup discovers the radio URI (several radios need `--uri`), exactly two live Lighthouse
@@ -135,11 +146,60 @@ intervene.
 The uploader detects the supported station slots (four on this drone), preserves factory
 calibration and verifies persistence; the result is in `lighthouse_upload`.
 
+## 3. Approach accuracy (Exp 3, issue #24)
+
+Measures how accurately the drone reaches tag centres in X-Y. One trial takes off from the
+launch pad, holds five seconds (`--dwell-s`) with the Lighthouse deck over each tag centre
+(nearest-first order), returns and lands. A session collects `--trials` (default 5; see `figures/lighthouse-rest-jitter.md`) accepted
+trials; the target is stored in `session.json`. `flight-cal approach-accuracy --resume DIR --trials 20`
+raises it later, with no devices opened (or add `--arm` to change it and keep flying). Add `--extra plot` to the command prefix for `--save-metrics` and `approach-metrics`.
+
+```sh
+flight-cal approach-accuracy --setup runs/setup --demo --out runs/exp3-preview      # dry run: preview/route-preview.png
+flight-cal approach-accuracy --setup runs/setup --demo --check-only --out runs/exp3-s1
+flight-cal approach-accuracy --setup runs/setup --demo --arm --save-metrics --resume runs/exp3-s1
+flight-cal approach-metrics runs/exp3-s1                                           # offline rebuild
+```
+
+- **Session.** `--out` must be a new directory; nothing is overwritten. The first live command
+  surveys every tag centre with the drone on its pad: median AprilTag corners from 20 frames,
+  cast onto the tag plane in the Lighthouse frame (`survey.json`, `survey.png`). It warns when a
+  centre is more than 1 cm from `rig.json`. With `--demo`, the camera pose is refitted once here
+  and then held fixed for every trial, so there is no recalibration between trials.
+- **Trials.** Before each trial the command asks you to reset the drone on its pad (Enter flies,
+  `q` stops). Each trial writes a new `trial-NN/` run; failed or rejected trials are kept and
+  excluded from metrics. After a battery swap, continue with `--resume DIR --arm` using the
+  same `--demo`, `--controller` and `--dwell-s`.
+- **Recalibration.** Before preflight, every live flight checks that the base stations still
+  match their calibration. It fits one drone pose to both stations' sweep angles with the drone on
+  its pad; a residual above 1.5 mrad means a station (or the cage it is on) moved, and the run
+  stops with "Re-run setup". After re-running setup, continue the same session with
+  `--resume DIR --setup NEW_SETUP --arm`: it re-surveys the tags for the new calibration, and
+  later trials use it. Metrics give each trial its own calibration's tag centres
+  (`summary_by_calibration` alongside the pooled `summary`).
+- **Errors.** Both are taken over each settled dwell (from 0.5 s after arrival).
+  - *Positioning:* the camera deck centre minus the surveyed tag centre. The detection-centre
+    ray is intersected with a horizontal plane at the median depth height, which corrects for
+    perspective. The raw depth point is also recorded.
+  - *Control:* the mean Lighthouse position minus the commanded centre.
+- **Safety.** Visual disagreement and detection misses are recorded, not fatal, in every mode.
+  All Lighthouse checks (tracking tolerance, workspace, attitude, battery, stations) still stop
+  the flight.
+- **Output.** `metrics.json` holds every approach (commanded, Lighthouse, camera and raw-depth
+  X-Y, both errors) plus mean, RMSE, sample standard deviation and bias, overall and per tag.
+  `approach-errors.png` shows the error vectors around each tag.
+- **Limitations.**
+  - Drone tilt is ignored.
+  - The detection box centre is not the deck sensor centre.
+  - With `--demo`, survey centres match `rig.json` by construction.
+  - Z is not evaluated.
+
 ## Drone detector
 
 The prepared YOLOE-L model (`runs/models/drone-yoloe-l.onnx`) is preferred automatically;
 nano (`runs/models/drone-nano.onnx`) is the fallback, or pass `--detector-model FILE` to setup.
-Visual prompts show this drone at the origin and +X positions (listed in
+Visual prompts show this drone at the origin and +X positions, and hovering over the cage-frame
+bars near tags 0, 1 and 3, where the original three prompts missed it (listed in
 `flight/configs/drone-reference.json`). Runtime inference uses ONNX Runtime on CPU, without
 PyTorch or a GPU.
 
@@ -152,7 +212,7 @@ uv run --project flight --python 3.12 --extra vision --extra detector --extra yo
 ```
 
 This uses the pinned Ultralytics package to download the official `yoloe-26l-seg.pt`
-checkpoint when absent, computes visual prompts from the three checked-in examples
+checkpoint when absent, computes visual prompts from the six checked-in examples
 (`flight/configs/drone-reference.json`) and exports the drone-specific detector. No radio or
 camera is opened. The outputs, all git-ignored, are:
 
@@ -213,7 +273,7 @@ Normal setup does not use them. The initial D455 tag estimates are in
 ## Tests
 
 ```sh
-uv run --project flight --extra test pytest flight/tests -q
+uv run --project flight --extra test --extra vision --extra plot pytest flight/tests -q
 uv run --project brixzle --extra test pytest brixzle/tests/test_flight_parity.py -q
 ```
 

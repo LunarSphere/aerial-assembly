@@ -82,7 +82,7 @@ def wait_for_position(cf, queue, clock, timeout=PREFLIGHT_TIMEOUT):
     """Bitcraze variance criterion (spread < 0.001 over 10 samples) plus a stationary position."""
     deadline = clock.time() + timeout
     history = deque(maxlen=10)
-    last_received = None
+    last_received = spread = None
     while clock.time() < deadline:
         if not cf.is_connected():
             raise ConnectionError('Disconnected during preflight')
@@ -105,9 +105,13 @@ def wait_for_position(cf, queue, clock, timeout=PREFLIGHT_TIMEOUT):
         history.append(values)
         if len(history) == 10:
             cols = list(zip(*history))
-            if all(max(c) - min(c) < 0.001 for c in cols[:3]) and all(max(c) - min(c) < 0.02 for c in cols[3:]):
+            spread = [max(c) - min(c) for c in cols]
+            if all(v < 0.001 for v in spread[:3]) and all(v < 0.02 for v in spread[3:]):
                 return np.array([sum(c)/len(c) for c in cols[3:]])
-    raise TimeoutError('No stable Lighthouse position within 30 s; no arming requested')
+    detail = ('no fresh estimator samples' if spread is None else
+              f'last 5 s spread: position {np.round(np.array(spread[3:])*1000, 1).tolist()} mm (limit 20), '
+              f'variance {np.round(spread[:3], 4).tolist()} (limit 0.001)')
+    raise TimeoutError(f'No stable Lighthouse position within 30 s ({detail}); no arming requested')
 
 
 def battery(cf, queue, clock, n=5, timeout=5.0):
@@ -148,12 +152,14 @@ def run_preflight(scf, plan, LogConfig, clock, vbat_min=VBAT_MIN, home_tolerance
     set_parameter(cf, 'kalman.resetEstimation', 1)
     clock.sleep(0.1)
     set_parameter(cf, 'kalman.resetEstimation', 0)
-    with samples(cf, LogConfig, clock, VARIANCE_NAMES + POSITION_NAMES, period_ms=500) as q:
-        pos = wait_for_position(cf, q, clock)
+    # Battery first: a depleted battery also makes the Lighthouse estimate noisy, and would
+    # otherwise surface as a misleading "no stable position" after a 30 s wait.
     with samples(cf, LogConfig, clock, ('pm.vbat',)) as q:
         vbat = battery(cf, q, clock)
     if vbat < vbat_min:
-        raise PreflightError(f'Battery {vbat:.2f} V < {vbat_min} V; no arming requested')
+        raise PreflightError(f'Battery {vbat:.2f} V < {vbat_min} V; swap the battery. No arming requested')
+    with samples(cf, LogConfig, clock, VARIANCE_NAMES + POSITION_NAMES, period_ms=500) as q:
+        pos = wait_for_position(cf, q, clock)
     home = np.asarray(plan['home']['pos'])
     if np.linalg.norm(pos[:2] - home[:2]) > home_tolerance or abs(pos[2] - home[2]) > home_tolerance:
         raise PreflightError(f'Drone at {np.round(pos, 3).tolist()} is not on the stand at '

@@ -18,6 +18,7 @@ from .lighthouse import check_live_geometry
 from .rig import corners
 
 POSITION_NAMES = ('stateEstimate.x', 'stateEstimate.y', 'stateEstimate.z')
+WARMUP_FRAMES = 15
 HEALTH_NAMES = ('pm.vbat', 'lighthouse.bsActive', 'stateEstimate.roll', 'stateEstimate.pitch', 'stateEstimate.yaw')
 
 
@@ -175,6 +176,28 @@ def publish_latest(queue, value):
             pass
 
 
+def recording(args):
+    """Exp 3 records visual disagreement and detection misses instead of stopping on them."""
+    return getattr(args, 'command', None) == 'approach-accuracy'
+
+
+def refit_frame(rig, found, intrinsics, pose, start_pose):
+    """Refit the camera to the floor tags visible in one frame (the drone covers at most one).
+
+    Keeps deck positions relative to the tags even if the cage carrying the camera moves.
+    Returns the new camera pose, or the previous one with a warning if the fit is rejected.
+    """
+    from .registration import refresh_pose
+    visible = {t['id'] for t in rig['tags']} & set(found)
+    try:
+        fit = refresh_pose(rig, {i: found[i] for i in visible}, intrinsics, pose.to_dict())
+    except ValueError as e:
+        return pose, dict(warning=f'kept previous camera pose: {e}')
+    new = Pose.from_dict(fit['T_lighthouse_camera'])
+    return new, dict(rms_px=fit['reprojection_rms_px'], tags=sorted(visible),
+                     camera_shift_m=float(np.linalg.norm(np.subtract(new.pos, start_pose.pos))))
+
+
 def camera_worker(args, rig, calibration, queue, stop, out):
     """Camera IO/vision lives in a process so a blocked camera cannot block flight cleanup."""
     from .camera import cv, open_camera, project_points, intrinsics_compatibility
@@ -201,10 +224,17 @@ def camera_worker(args, rig, calibration, queue, stop, out):
             # from the fixed map using current intrinsics, including thermal drift.
             if not getattr(args, 'demo', False):
                 camera.intrinsics = saved_intrinsics
+            # The first frames after opening are colour-cast and can be shifted while
+            # exposure, white balance and the mount settle; setup and the survey skip them too.
+            for _ in range(WARMUP_FRAMES):
+                camera.frame()
             c = cv()
             registration = None
-            if getattr(args, 'demo', False):
-                from .registration import refresh_pose
+            record = recording(args)
+            from .registration import refresh_pose
+            # Exp 3 always refits the camera to the fixed floor tags: the cage carrying the
+            # camera can shift when someone steps in to reset the drone.
+            if getattr(args, 'demo', False) or record:
                 captures = []
                 deadline = time.monotonic()+15
                 while len(captures) < 10 and time.monotonic() < deadline:
@@ -236,16 +266,22 @@ def camera_worker(args, rig, calibration, queue, stop, out):
             rv = Rotation.from_quat(wxyz_to_xyzw(inv.quat)).as_rotvec()
             k, d = np.array(camera.intrinsics['matrix']), np.array(camera.intrinsics['distortion'])
             saved, last_saved = 0, -math.inf
+            start_pose = inv.inverse()
             while not stop.is_set():
                 frame = camera.frame()
                 found = detect(frame.color)
+                frame_registration = None
+                if record:
+                    pose, frame_registration = refit_frame(rig, found, camera.intrinsics, inv.inverse(), start_pose)
+                    inv = pose.inverse()
+                    rv = Rotation.from_quat(wxyz_to_xyzw(inv.quat)).as_rotvec()
                 errors = []
                 for tag in rig['tags']:
                     if tag['id'] in found:
                         projected = project_points(corners(tag), rv, np.array(inv.pos), camera.intrinsics)
                         errors.extend(np.linalg.norm(projected - found[tag['id']], axis=1).tolist())
                 status = dict(time=frame.timestamp, visible_ids=sorted(found),
-                              registration=registration,
+                              registration=registration, frame_registration=frame_registration,
                               alignment_rms_px=float(np.sqrt(np.mean(np.square(errors)))) if errors else None)
                 if len(errors) < 8 or status['alignment_rms_px'] > 2.:
                     status['error'] = (f'Camera/tag projection mismatch ({status["alignment_rms_px"]} px); '
@@ -254,14 +290,15 @@ def camera_worker(args, rig, calibration, queue, stop, out):
                     try:
                         # Demo flight uses Lighthouse position; depth on propellers/background
                         # and a learned box centre are not reliable precision measurements.
-                        if getattr(args, 'demo', False):
+                        # Exp 3 measures exactly that, so it keeps depth in every mode.
+                        if getattr(args, 'demo', False) and not record:
                             from .camera import Frame
                             visual_frame = Frame(frame.color, frame.timestamp, metadata=frame.metadata)
                         else:
                             visual_frame = frame
                         observation = observe(visual_frame, camera.intrinsics, detector)
                     except (ValueError, RuntimeError) as e:
-                        if not getattr(args, 'demo', False):
+                        if not (getattr(args, 'demo', False) or record):
                             raise
                         status['vision_warning'] = str(e)
                         observation = None
@@ -270,8 +307,11 @@ def camera_worker(args, rig, calibration, queue, stop, out):
                     # Depth supplies an estimated 3D position.
                     # This is a visual body centre, not a measured Lighthouse sensor centre.
                     if observation is not None:
-                        position = inv.inverse().apply(observation['point_camera_m'])
+                        transform = inv.inverse()
+                        position = transform.apply(observation['point_camera_m'])
                         status['drone_world_m'] = position.tolist()
+                        status['drone_ray_world_m'] = dict(origin=list(transform.pos),
+                            direction=transform.rotate(observation['ray_camera']).tolist())
                         status['tag_offsets_m'] = {str(t['id']): (position-np.array(t['pose']['pos'])).tolist()
                                                    for t in rig['tags']}
                     if observation is not None:
@@ -301,9 +341,11 @@ class CameraMonitor:
         self.latest, self.emit = None, emit
         self.calibration = calibration
         self.demo = getattr(args, 'demo', False)
+        self.record_only = recording(args)
         self.in_flight = False
         self.last_warning = None
         self.max_age_s = 1.
+        self.settle_s = 5.
         self.position_history = deque()
 
     def __enter__(self):
@@ -311,8 +353,17 @@ class CameraMonitor:
         try:
             self.latest = self.queue.get(timeout=30)
             self.emit(dict(event='camera', **self.latest))
-            self.check()
-            return self
+            # Fail preflight only on a persistent camera problem, not one disturbed frame
+            # (for example the mount still swaying after the drone was reset by hand).
+            deadline = time.monotonic()+self.settle_s
+            while True:
+                try:
+                    self.check()
+                    return self
+                except RuntimeError as e:
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError(f'{e} (persisted for {self.settle_s:g} s)') from e
+                    time.sleep(.2)
         except BaseException:
             self.__exit__(None, None, None)
             raise
@@ -335,7 +386,7 @@ class CameraMonitor:
         elif 'error' in self.latest:
             issue = self.latest['error']
         if issue:
-            if self.demo and self.in_flight:
+            if (self.demo or self.record_only) and self.in_flight:
                 if issue != self.last_warning:
                     self.emit(dict(event='vision_warning', reason=issue, flight_control='lighthouse'))
                     self.last_warning = issue
@@ -350,7 +401,7 @@ class CameraMonitor:
             if 'drone_world_m' in self.latest:
                 error = float(np.linalg.norm(np.array(self.latest['drone_world_m'])-expected_position))
                 self.emit(dict(event='visual_tracking_error', error_m=error, metric='body_centre_3d'))
-                if error > .05 and not self.demo:
+                if error > .05 and not (self.demo or self.record_only):
                     raise RuntimeError('Visual drone position differs from Lighthouse by more than 5 cm')
 
     def __exit__(self, *exc):
@@ -360,6 +411,26 @@ class CameraMonitor:
             self.process.terminate()
             self.process.join(timeout=2)
         self.queue.close()
+
+
+def check_stations(cf, rig, geometry, pad, output, emit):
+    """Before preflight: do the base stations still match their calibration?
+
+    A station that moved (for example with the cage it is mounted on) makes the estimate jump
+    by centimetres while the drone rests, which otherwise surfaces only as a 30 s
+    "no stable position" timeout. Never arms; the angle stream uses temporary settings only.
+    """
+    from .lighthouse import collect, station_consistency
+    sample = collect(cf, rig['base_stations'], diagnostics_path=Path(output)/'station-check-stream.json')
+    result = station_consistency(sample['angles'], geometry, start=pad)
+    result['pad_offset_m'] = float(np.linalg.norm(np.subtract(result['position_m'], pad)))
+    emit(dict(event='station_check', **result))
+    if not result['consistent']:
+        raise RuntimeError(
+            f'Lighthouse base stations no longer match their calibration: sweep-angle residual '
+            f'{result["worst_rms_mrad"]:.1f} mrad (limit {result["limit_mrad"]:g}; a fresh calibration gives '
+            f'under 1). A station, or the cage it is mounted on, has probably moved. Re-run setup.')
+    return result
 
 
 def execute(cf, plan, rig, health, camera, clock, emit):
@@ -447,6 +518,14 @@ def run(args, rig, ask=input):
             summary = ', '.join(f'{s["tag_id"]}: {s["inward_offset_m"]*100:.0f} cm'
                                 for s in plan['segments'] if 'tag_id' in s)
             print(f'Tag visits toward the centre (tag: offset): {summary}.', flush=True)
+        elif command == 'approach-accuracy':
+            from .visits import centre_route, preview
+            plan = centre_route(rig, pose_calibration, intrinsics, centres=getattr(args, 'tag_centres', None),
+                                demo=demo, dwell_s=getattr(args, 'dwell_s', 5.))
+            plan['camera_pose_source'] = source
+            preview(plan, output/'route-preview.png')
+            order = ', '.join(str(s['tag_id']) for s in plan['segments'] if 'tag_id' in s)
+            print(f'Over-centre visits (tag order): {order}; {plan["duration_s"]:.0f} s planned.', flush=True)
         else:
             plan = route(rig, demo=demo, hover_s=getattr(args, 'hover_seconds', 10.))
         plan['controller'] = controller
@@ -501,6 +580,8 @@ def run(args, rig, ask=input):
             else:
                 check_live_geometry(scf.cf, solution['geometry'], factory)
             reference_home = dict(rig['home'], pos=(np.array(rig['home']['pos']) + rig['body_to_sample_m']).tolist())
+            consistency = check_stations(scf.cf, rig, solution['geometry'], reference_home['pos'], output, emit)
+            artifacts.report(output, station_consistency=consistency)
             preflight_plan = dict(home=reference_home, settings=dict(geofence=rig['geofence'],
                 params={'lighthouse.method': 1} if demo else {}))
             report = run_preflight(scf, preflight_plan, LogConfig, clock, home_tolerance=.10 if demo else .03,
@@ -536,6 +617,8 @@ def run(args, rig, ask=input):
             visibility = visit_visibility(output/'events.jsonl', plan)
             artifacts.write(output/'tag-visibility.json', visibility)
             question = f'Did the drone hover beside all {len(rig["tags"])} tags with the tags visible?'
+        elif command == 'approach-accuracy':
+            question = f'Did the drone hover over all {len(rig["tags"])} tag centres and land?'
         else:
             question = 'Did the drone hold steadily over the launch point and land?'
         artifacts.report(output, flight_complete=True, operator_observation='pending')

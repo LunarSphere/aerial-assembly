@@ -14,6 +14,7 @@ vision = ["opencv-python>=4.10,<5"]
 realsense = ["pyrealsense2>=2.56,<3"]
 detector = ["onnxruntime>=1.20,<2"]
 yolo = ["ultralytics==8.4.178; python_version >= '3.11'", "onnx>=1.16,<2"]
+plot = ["matplotlib>=3.8,<4"]
 test = ["pytest>=8,<10"]
 
 [project.scripts]

@@ -39,7 +39,11 @@ def parser():
     camera_arguments(p)
     p.add_argument('--uri', help='optional Crazyflie URI; defaults to Crazyradio scan')
     p.add_argument('--detector-model', help='optional prompted drone ONNX model; prefers prepared YOLOE-L, otherwise nano')
-    p.add_argument('--max-camera-rms-px', type=float, default=1., help='camera fit RMS limit in pixels; default 1.0, use 2.0 to allow a 1.88 px fit')
+    p.add_argument('--max-camera-rms-px', type=float, help='camera fit RMS limit in pixels (default 3.0)')
+    p.add_argument('--sample-trigger', choices=('motion', 'enter'), default='motion',
+                   help='how each Lighthouse-only space/check sample starts: move then hold the drone still (default) or press Enter')
+    p.add_argument('--reference-only', action='store_true',
+                   help='skip the 8 space samples and 5 checks; solve stations from the three floor placements only')
     p.add_argument('--advanced', action='store_true', help='use the earlier detailed manual measurement questionnaire')
     p.add_argument('--layout', help='camera-estimated layout.json to prefill tag inventory, positions and rotations')
     p.add_argument('--tag-ids', type=int, nargs='+', help='manual tag IDs; default 0–5, at least 0,1,2 plus two check tags')
@@ -68,6 +72,14 @@ def parser():
     p = commands.add_parser('tag-visit', help='visit beside every tag toward the centre; dry run unless --arm')
     flight_arguments(p)
     p.add_argument('--tag-offset-m', type=float, default=.15, help='minimum inward offset; automatically extends up to 0.40 m to clear tags in camera view (default 0.15)')
+    p = commands.add_parser('approach-accuracy', help='Exp 3: repeated hovers over every surveyed tag centre; dry run unless --arm')
+    flight_arguments(p)
+    p.add_argument('--trials', type=int, help='accepted trials to collect, 1–100 (default 5); with --resume, changes the session target')
+    p.add_argument('--dwell-s', type=float, default=5., help='hold over each tag centre, 0–30 seconds (default 5)')
+    p.add_argument('--resume', help='existing session directory to continue (instead of --out)')
+    p.add_argument('--save-metrics', action='store_true', help='write metrics.json and approach-errors.png after every trial')
+    p = commands.add_parser('approach-metrics', help='offline: rebuild Exp 3 metrics.json and plot from a session directory')
+    p.add_argument('session')
     p = commands.add_parser('devices', help='list connected RealSense cameras')
     p = commands.add_parser('replay-lighthouse', help='offline re-solve saved samples; never uploads or opens a radio')
     p.add_argument('--samples', required=True)
@@ -89,9 +101,16 @@ def main(argv=None):
     if args.command in ('hover-check', 'tag-visit') and not args.out:
         args.out = f'runs/{args.command}'
     try:
+        if args.command == 'approach-accuracy' and bool(args.out) == bool(args.resume):
+            raise ValueError('Give a new session directory with --out, or continue one with --resume')
+        if args.command == 'approach-accuracy' and args.resume and args.trials is not None and not (
+                args.arm or args.check_only or args.camera_check_only):
+            from .accuracy import run_session
+            print(run_session(args, None))  # only changes the stored target; no devices opened
+            return 0
         if args.command in ('survey', 'setup'):
             if args.advanced:
-                if args.max_camera_rms_px != 1.:
+                if args.max_camera_rms_px is not None:
                     raise ValueError('--max-camera-rms-px applies to compact setup, not --advanced')
                 rig.survey(args.out, layout_path=args.layout, tag_ids=args.tag_ids, measure_checks=args.measure_check_tags)
                 print(f'Survey saved: {args.out}')
@@ -107,6 +126,15 @@ def main(argv=None):
         elif args.command == 'estimate-tags':
             from .layout import capture
             print(capture(args))
+        elif args.command == 'approach-metrics':
+            from .accuracy import write_metrics
+            metrics = write_metrics(args.session)
+            for kind, summary in metrics['summary'].items():
+                overall = summary['overall']
+                print(f'{kind}: ' + (f'mean {overall["mean_error_m"]*100:.2f} cm, RMSE {overall["rmse_m"]*100:.2f} cm, '
+                                     f'n={overall["n"]}' if overall['n'] else 'no measurements')
+                      + f', missing {summary["missing"]}')
+            print(f'Metrics: {Path(args.session)/"metrics.json"}')
         elif args.command == 'devices':
             print(json.dumps(devices(args), indent=2))
         elif args.command == 'replay-lighthouse':
@@ -118,7 +146,7 @@ def main(argv=None):
             print(f'Offline quality check: {result["accepted"]}; no hardware upload. Report: {out}')
             return 0 if result['accepted'] else 1
         else:
-            if args.command in ('hover-check', 'tag-visit'):
+            if args.command in ('hover-check', 'tag-visit', 'approach-accuracy'):
                 if args.setup:
                     setup = Path(args.setup)
                     status = artifacts.read(setup/'report.json')
@@ -145,6 +173,9 @@ def main(argv=None):
                 output = run(args, survey)
                 print(output)
                 return 0 if artifacts.read(output / 'report.json')['accepted'] else 1
+            elif args.command == 'approach-accuracy':
+                from .accuracy import run_session
+                print(run_session(args, survey))
         return 0
     except KeyboardInterrupt:
         print('flight-cal: interrupted; inspect the session report before retrying', file=sys.stderr)
