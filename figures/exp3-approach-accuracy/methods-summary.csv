@@ -5,15 +5,21 @@ pooled,sam2.1_b,25,1.6650,2.0594,4.9422
 pooled,sam2.1_b_minus_box,25,0.8707,0.9487,1.4307
 pooled,sam3,25,1.4893,1.8610,4.6559
 pooled,sam3_minus_box,25,0.6591,0.7314,1.2564
+pooled,sam3-deck,25,1.2938,1.6263,3.6847
+pooled,sam3-deck_minus_box,25,1.1921,1.4573,3.5510
 calibration 1,box_all_frames,15,1.7387,2.0111,4.2313
 calibration 1,box,15,1.7952,2.1382,4.4455
 calibration 1,sam2.1_b,15,2.0597,2.4417,4.9422
 calibration 1,sam2.1_b_minus_box,15,0.8411,0.9155,1.3326
 calibration 1,sam3,15,1.8610,2.2486,4.6559
 calibration 1,sam3_minus_box,15,0.6554,0.7198,1.1867
+calibration 1,sam3-deck,15,1.7124,2.0217,3.6847
+calibration 1,sam3-deck_minus_box,15,1.3574,1.6363,3.5510
 calibration 2,box_all_frames,10,1.2352,1.2668,1.6769
 calibration 2,box,10,1.1671,1.2374,1.7977
 calibration 2,sam2.1_b,10,1.0730,1.2882,2.1315
 calibration 2,sam2.1_b_minus_box,10,0.9152,0.9964,1.4307
 calibration 2,sam3,10,0.9318,1.0364,1.6233
 calibration 2,sam3_minus_box,10,0.6646,0.7484,1.2564
+calibration 2,sam3-deck,10,0.6658,0.6936,0.8670
+calibration 2,sam3-deck_minus_box,10,0.9440,1.1373,2.3639

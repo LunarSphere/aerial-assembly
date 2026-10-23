@@ -26,9 +26,9 @@ HERE = Path(__file__).resolve().parent
 DATA = HERE/'data'
 CALIBRATION_COLOURS = {1: '#2a78d6', 2: '#eb6834'}
 CALIBRATION_MARKERS = {1: 'o', 2: '^'}
-METHOD_COLOURS = {'box': '#52514e', 'sam2.1_b': '#7a3fc4', 'sam3': '#1a8a7a'}
-METHOD_MARKERS = {'sam2.1_b': 'o', 'sam3': 's'}
-METHOD_LABELS = {'sam2.1_b': 'SAM 2.1', 'sam3': 'SAM 3'}
+METHOD_COLOURS = {'box': '#52514e', 'sam2.1_b': '#7a3fc4', 'sam3': '#1a8a7a', 'sam3-deck': '#c0571a'}
+METHOD_MARKERS = {'sam2.1_b': 'o', 'sam3': 's', 'sam3-deck': 'D'}
+METHOD_LABELS = {'sam2.1_b': 'SAM 2.1 drone', 'sam3': 'SAM 3 drone', 'sam3-deck': 'SAM 3 deck'}
 INK, MUTED, GRID, SURFACE = '#0b0b0b', '#52514e', '#e8e7e3', '#fcfcfb'
 
 
@@ -256,7 +256,7 @@ def plot_methods(rows, path):
     for model in models:
         axis.scatter(x+offsets[model], [r[f'{model}_cm'] for r in rows], s=34, marker=METHOD_MARKERS[model],
                      color=METHOD_COLOURS[model], edgecolor=SURFACE, linewidth=1.2, zorder=3,
-                     label=f'{METHOD_LABELS[model]} mask centroid')
+                     label=METHOD_LABELS[model])
     trials = [r['trial'] for r in rows]
     starts = [i for i in range(len(rows)) if i == 0 or trials[i] != trials[i-1]]
     for i in starts[1:]:
