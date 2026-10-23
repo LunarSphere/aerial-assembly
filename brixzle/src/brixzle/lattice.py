@@ -2,15 +2,14 @@
 
 Lattice: voxel i spans x in [iU, (i+1)U]; course k sits at z = k H0. A brick
 at (course k, start voxel i0) covers voxels i0 and i0+1 with its centre at
-x = (i0+1) U. In 'alternate' lean mode even courses are orientation A and odd
-courses B (A rotated 180 degrees about Z), so the alternating tooth lean is
-enforced by the lattice; in 'uniform' mode every course is A. In 'ab' mode two
-distinct parts alternate (A on even, B on odd courses), both unrotated, so every
-tooth trails toward -x; a placement with direction=-1 (building toward -x) uses
-the other part rotated 180 degrees, which flips the lean to +x.
+x = (i0+1) U. Two distinct parts alternate (A on even, B on odd courses), both
+unrotated, so every tooth trails toward -x; a placement with direction=-1
+(building toward -x) uses the other part rotated 180 degrees ("orientation B"),
+which flips the lean to +x.
 Bases are anchored plates covering a voxel range and receive course 0.
 """
 from dataclasses import dataclass, field
+from functools import lru_cache
 import math
 
 import networkx as nx
@@ -26,11 +25,7 @@ from .params import BrickParams
 class Placement:
     course: int
     i0: int
-    direction: int = 1  # 'ab' mode: build direction the teeth hook against
-
-    @property
-    def orientation(self):
-        return 'A' if self.course % 2 == 0 else 'B'
+    direction: int = 1  # build direction the teeth hook against
 
     @property
     def voxels(self):
@@ -53,15 +48,11 @@ class Structure:
 
 def orientation(p: BrickParams, b: Placement):
     """'A' (unrotated) or 'B' (rotated 180 degrees about Z) frame for the placement."""
-    if p.lean_mode == 'ab':
-        return 'B' if b.direction < 0 else 'A'
-    return 'A' if p.uniform else b.orientation
+    return 'B' if b.direction < 0 else 'A'
 
 
 def part(p: BrickParams, b: Placement):
-    """Which physical part sits at the placement ('A' unless in 'ab' mode)."""
-    if p.lean_mode != 'ab':
-        return 'A'
+    """Which physical part ('A' or 'B') sits at the placement."""
     even = b.course % 2 == 0
     return ('A' if even else 'B') if b.direction > 0 else ('B' if even else 'A')
 
@@ -75,19 +66,25 @@ def pose(p: BrickParams, b: Placement):
 
 def insertion_axis(p: BrickParams, b: Placement):
     """Unit (x, z) direction the brick moves along during final seating."""
-    if p.lean_mode == 'ab':
-        # Both parts' teeth trail toward -x; the 180-degree rotation flips it.
-        _, d, _, _ = pr.interface(p, mirrored=False)
-        return d if orientation(p, b) == 'A' else d*np.array([-1., 1.])
-    a_mirrored = not p.uniform
-    mirrored = a_mirrored if orientation(p, b) == 'A' else not a_mirrored
-    _, d, _, _ = pr.interface(p, mirrored=mirrored)
-    return d
+    # Both parts' teeth trail toward -x; the 180-degree rotation flips it.
+    _, d, _, _ = pr.interface(p, mirrored=False)
+    return d if orientation(p, b) == 'A' else d*np.array([-1., 1.])
+
+
+@lru_cache(maxsize=32)
+def _outers(p):
+    return {k: pr.brick_parts(p, k)['outer'] for k in ('A', 'B')}
+
+
+def outers(p: BrickParams):
+    """{part: outer profile polygon} for A and B."""
+    return dict(_outers(p))
 
 
 def footprint(p: BrickParams, outer, b: Placement, offset=(0., 0.)):
-    """``outer`` is one profile polygon or {part: polygon}."""
-    g = outer[part(p, b)] if isinstance(outer, dict) else outer
+    """``outer`` is {part: polygon}; a missing part (or None) uses that part's own outline."""
+    k = part(p, b)
+    g = (outer or {}).get(k) or _outers(p)[k]
     g = g if orientation(p, b) == 'A' else pr.mirror_x(g)
     pos, _ = pose(p, b)
     return affinity.translate(g, pos[0] + offset[0], pos[2] + offset[1])
@@ -133,7 +130,7 @@ def _path_clear(p, outer, b, placed_shapes, samples=10):
     return not any(swept.intersection(s).area > 0.5 for s in placed_shapes)
 
 
-def assembly_order(p: BrickParams, structure: Structure, outer):
+def assembly_order(p: BrickParams, structure: Structure, outer=None):
     """Greedy topological order: supporters first, approach path clear of placed bricks.
 
     Prefers the lowest course, then the most-supported brick. Raises if the

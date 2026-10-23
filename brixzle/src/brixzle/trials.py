@@ -14,6 +14,7 @@ from scipy.spatial.transform import Rotation
 from .config import Physics
 
 from . import lattice as L
+from .cad import as_pair
 from .params import BrickParams
 from .scene import MM, activate, body_pose, build_scene, park
 
@@ -183,7 +184,7 @@ def run_until_settled(model, data, info, j, tol: Tolerance, owner, watch=(), fra
 
 
 def _bundles(brick):
-    return {'A': brick} if 'collision' in brick else brick
+    return as_pair(brick)
 
 
 def _outers(bundles):

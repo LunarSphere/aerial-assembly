@@ -23,6 +23,7 @@ import math
 import numpy as np
 
 from . import lattice as L, trials as T
+from .cad import as_pair
 from .drone_params import DroneConfig
 from .fixture import FixtureParams, slot_pose, stand_home
 
@@ -86,19 +87,24 @@ def brick_axis(p, b: L.Placement):
     return _rotz(-_quat_yaw(q)) @ np.array([d[0], 0., d[1]])
 
 
+def slot_kind(p, b: L.Placement, fp: FixtureParams):
+    """Fixture slot kind for a placement: its part, turned ('r') for -x builds when pre-rotating."""
+    return L.part(p, b) + ('r' if fp.prerotate_B and L.orientation(p, b) == 'B' else '')
+
+
 def assign_slots(p, order, fp: FixtureParams, n_slots):
-    """Slot per brick: matching orientation (when pre-rotating), cycling so each slot is refilled after a pick."""
-    want = [L.orientation(p, b) if fp.prerotate_B else 'A' for b in order]
+    """Slot per brick: matching part and turn, cycling so each slot is refilled after a pick."""
+    want = [slot_kind(p, b, fp) for b in order]
     kinds = sorted(set(want))
     per = max(1, n_slots//len(kinds))
-    orientations = [k for k in kinds for _ in range(per)]
+    slot_kinds = [k for k in kinds for _ in range(per)]
     counters = {k: 0 for k in kinds}
     slots = []
     for o in want:
-        idx = [i for i, so in enumerate(orientations) if so == o]
+        idx = [i for i, so in enumerate(slot_kinds) if so == o]
         slots.append(idx[counters[o] % len(idx)])
         counters[o] += 1
-    return orientations, slots
+    return slot_kinds, slots
 
 
 def _seg(phase, op, to=None, duration=None, z_world=None, **kw):
@@ -203,19 +209,22 @@ def _fill_durations(segs, frame_pos, prev_pos, cfg):
 def compile_plan(p, structure, brick_bundle, gripper, fp: FixtureParams, drone: DroneConfig,
                  cfg: PlannerConfig = PlannerConfig(), tol: T.Tolerance = T.Tolerance(), n_slots=4, bricks=None,
                  camera_sigma_mm=0.5, camera_sigma_deg=0.3):
-    """Return (plan, layout). ``bricks`` limits the plan to the first n bricks of the order."""
+    """Return (plan, layout). ``brick_bundle`` is the {'A', 'B'} pair (one part's bundle is
+    completed with the other); ``bricks`` limits the plan to the first n bricks of the order."""
     from flight.frames import Pose
-    outer = {'A': brick_bundle['outer']}
-    order = L.assembly_order(p, structure, outer)
+    pair = as_pair(brick_bundle)
+    order = L.assembly_order(p, structure, {k: v['outer'] for k, v in pair.items()})
     order = order[:bricks] if bricks else order
     graph = L.connectivity(structure)
-    orientations, slot_of = assign_slots(p, order, fp, n_slots)
-    payload_g = gripper['mass_g'] + brick_bundle['mass_g']
+    slot_kinds, slot_of = assign_slots(p, order, fp, n_slots)
+    heaviest = max(v['mass_g'] for v in pair.values())
+    payload_g = gripper['mass_g'] + heaviest
     empty = (drone.mass_g + gripper['mass_g'])*1e-3
-    mass = {'empty': empty, 'loaded': empty + brick_bundle['mass_g']*1e-3}
-    top = max(structure_top_mm(p, order, brick_bundle), fp.origin[2] + 40.)
-    hang = -(np.asarray(gripper['carry'])[2] + (brick_bundle['mesh'].bounds[0][2] if 'mesh' in brick_bundle
-                                                 else brick_bundle['outer'].bounds[1]))
+    mass_of = {k: {'empty': empty, 'loaded': empty + v['mass_g']*1e-3} for k, v in pair.items()}
+    mass = {'empty': empty, 'loaded': empty + heaviest*1e-3}
+    top = max(max(structure_top_mm(p, order, v) for v in pair.values()), fp.origin[2] + 40.)
+    hang = -(np.asarray(gripper['carry'])[2] + min(v['mesh'].bounds[0][2] if 'mesh' in v else v['outer'].bounds[1]
+                                                   for v in pair.values()))
     transit_z = (top + hang + cfg.transit_margin_mm)*MM
     home = stand_home(fp)*MM
     entries = []
@@ -227,12 +236,13 @@ def compile_plan(p, structure, brick_bundle, gripper, fp: FixtureParams, drone: 
     placed = []
     for k, b in enumerate(order):
         slot = slot_of[k]
-        spos, squat, _ = slot_pose(p, fp, slot, orientations[slot])
+        spos, squat, _ = slot_pose(p, fp, slot, slot_kinds[slot])
         slot_frame = Pose(tuple(spos*MM), tuple(squat))
-        d_slot = brick_axis(p, L.Placement(0, 0))     # slot frame == a course-0 'A' seat, turned
-        pick, abort = fork_pick(p, gripper, d_slot, cfg, transit_z, mass, hooked=fp.hooked, guided=fp.funnel)
+        d_slot = brick_axis(p, L.Placement(0, 0))     # slot frame == an unrotated course-0 seat, turned
+        m = mass_of[L.part(p, b)]
+        pick, abort = fork_pick(p, gripper, d_slot, cfg, transit_z, m, hooked=fp.hooked, guided=fp.funnel)
         d_seat = brick_axis(p, b)
-        place = fork_place(p, gripper, d_seat, cfg, transit_z, mass)
+        place = fork_place(p, gripper, d_seat, cfg, transit_z, m)
         seat_pos, seat_q = L.pose(p, b)
         seat_frame = Pose(tuple(seat_pos*MM), tuple(seat_q))
         supporters = sorted(u for u in graph.predecessors(b.name))
@@ -257,7 +267,7 @@ def compile_plan(p, structure, brick_bundle, gripper, fp: FixtureParams, drone: 
         t = sum(s.get('duration', 0.) + (cfg.settle_s if s['op'] == 'go_to' else 0.) for s in pick + place)
         per_brick.append(t)
         entries.append({'name': b.name, 'course': b.course, 'i0': b.i0, 'part': L.part(p, b),
-                        'orientation': L.orientation(p, b), 'slot': slot,
+                        'orientation': L.orientation(p, b), 'slot': slot, 'slot_kind': slot_kinds[slot],
                         'carry': (np.asarray(gripper['carry'])*MM).tolist(),
                         'pick': {'slot_nominal': slot_frame.to_dict(), 'segments': pick, 'abort': abort},
                         'place': {'frame': frame, 'segments': place}})
@@ -295,6 +305,6 @@ def compile_plan(p, structure, brick_bundle, gripper, fp: FixtureParams, drone: 
         'bases': bases,
         'bricks': entries,
     }
-    layout = {'order': order, 'orientations': orientations, 'slot_of': slot_of, 'transit_z': transit_z,
+    layout = {'order': order, 'slot_kinds': slot_kinds, 'slot_of': slot_of, 'transit_z': transit_z,
               'payload_g': payload_g, 'per_brick_s': per_brick}
     return plan, layout

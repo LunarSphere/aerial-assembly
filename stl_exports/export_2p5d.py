@@ -1,5 +1,4 @@
 """Export print STLs for the 2.5D brixzle parts (run with brixzle's uv env)."""
-from dataclasses import replace
 from pathlib import Path
 
 import cadquery as cq
@@ -22,18 +21,16 @@ def save(mesh, path):
     print(f'{path.relative_to(OUT)}: {mesh.volume*1.24e-3:.1f} g solid, watertight={mesh.is_watertight}')
 
 
-# AB pair (pegs lean against the build direction)
-ab = replace(V0, lean_mode='ab')
-for name, b in cad.build_bricks(ab).items():
+# AB pair (pegs lean against the build direction; both parts share the fork's tine bores)
+for name, b in cad.build_bricks(V0).items():
     save(b['mesh'], OUT/'2p5d_ab'/f'brick_{name}.stl')
-save(base_mesh(ab, 4, +1), OUT/'2p5d_ab'/'base_plate_build_plus_x_4vox.stl')
-save(base_mesh(ab, 4, -1), OUT/'2p5d_ab'/'base_plate_build_minus_x_4vox.stl')
+save(base_mesh(V0, 4, +1), OUT/'2p5d_ab'/'base_plate_build_plus_x_4vox.stl')
+save(base_mesh(V0, 4, -1), OUT/'2p5d_ab'/'base_plate_build_minus_x_4vox.stl')
 
-# Ring / turn system (alternate mode): L3 turn plus the other ring parts
+# Ring / turn system: L3 turn (even courses, A cells), I3 corner (odd, B cells), K2 closers, straights
 parts = Rg.build_parts(V0)
-for name in ('L3', 'I3', 'K2', 'S2'):
+for name in Rg.BODIES:
     save(parts[name]['mesh'], OUT/'2p5d_ring'/f'{name}.stl')
-save(base_mesh(V0, 4), OUT/'2p5d_ring'/'base_plate_straight_4vox.stl')
 
 # Anchored base for a 6x6 ring: one oriented base cell per course-0 cell
 outer, _ = pr.base_outer(V0, 1, V0.tooth_L + V0.slot_extra + 4)

@@ -1,4 +1,4 @@
-"""'ab' lean mode: distinct A/B parts whose teeth all trail against the build direction."""
+"""The A/B pair: distinct parts whose teeth all trail against the build direction."""
 from dataclasses import replace
 
 import numpy as np
@@ -7,7 +7,7 @@ import pytest
 from brixzle import cad, lattice as L, profile as pr, rules as R, structures as S, trials as T
 from brixzle.params import V0
 
-AB = replace(V0, lean_mode='ab')
+AB = V0
 
 
 @pytest.fixture(scope='module')
@@ -49,8 +49,8 @@ def test_aligned_drop_seats(bricks, part):
     assert rows[0]['outcome'] == 'seated'
 
 
-def test_tight_ab_overhang_beats_alternate():
-    # Measured: tight 'ab' reaches 10 tracked/ideal, alternate 4-6 (README table).
+def test_tight_fit_holds_a_long_tracked_overhang():
+    # README table: the tight A/B fit reaches 10 bricks with ideal tracked aim (simulated).
     cfg = T.TrialConfig(error=T.ErrorModel(ideal=True, track_supporter=True))
     tight = replace(AB, clearance=0.05)
     r, _ = T.assemble(tight, cad.build_bricks(tight), S.overhang(12, 1), cfg)

@@ -65,8 +65,8 @@ def config_from_dict(d):
 
 
 def make_plan(p: BrickParams, gp, structure_name, cfg: FlyConfig, bricks=None):
-    brick = cad.build_brick(p)
-    gripper = Gr.build_gripper(gp, brick, p)
+    brick = cad.build_bricks(p)
+    gripper = Gr.build_gripper(gp, brick['A'], p)     # A and B share their tine bores
     structure = S.CATALOG[structure_name]()
     plan, layout = P.compile_plan(p, structure, brick, gripper, cfg.fixture, cfg.drone, cfg.planner, cfg.tolerance,
                                   n_slots=cfg.n_slots, bricks=bricks, camera_sigma_mm=cfg.camera.sigma_pos_mm,
@@ -84,16 +84,19 @@ class Harness:
         self.rng = np.random.default_rng(seed)
         names = [b['name'] for b in plan['bricks']]
         self.entries = {b['name']: b for b in plan['bricks']}
-        self.placements = {b['name']: L.Placement(b['course'], b['i0']) for b in plan['bricks']}
-        orients = ['A']*max(cfg.n_slots, max(b['slot'] for b in plan['bricks']) + 1)
+        self.placements = {b['name']: L.Placement(b['course'], b['i0'], -1 if b['orientation'] == 'B' else 1)
+                           for b in plan['bricks']}
+        brick = cad.as_pair(brick)
+        self.brick = brick
+        kinds = ['A']*max(cfg.n_slots, max(b['slot'] for b in plan['bricks']) + 1)
         for b in plan['bricks']:
-            yaw = Pose.from_dict(b['pick']['slot_nominal']).yaw
-            orients[b['slot']] = 'B' if abs(abs(yaw) - math.pi) < 1e-6 else 'A'
-        self.fixture = Fx.build_fixture(p, cfg.fixture, orients, brick['channels'])
+            kinds[b['slot']] = b['slot_kind']
+        self.fixture = Fx.build_fixture(p, cfg.fixture, kinds, brick['A']['channels'])
         home = np.asarray(plan['home']['pos'])
         static = list(self.fixture['collision']) + list(self.fixture['stand'])
         self.model, self.xml, self.info = scene.build_scene(
             p, brick, structure.bases, len(names), cfg.physics, visual=record_fps > 0, static=static,
+            body_parts=[b['part'] for b in plan['bricks']],
             drone={'cfg': cfg.drone, 'gripper': gripper, 'pos': home}, collision='collision_bored', sleep=True)
         self.data = mujoco.MjData(self.model)
         origin = np.asarray(cfg.fixture.origin)*MM
@@ -281,8 +284,8 @@ def run_plan(plan, seed=0, record_fps=0):
     p = BrickParams.from_dict(sim['params'])
     gp = Gr.params_from_dict(sim['gripper'])
     cfg = config_from_dict(sim['config'])
-    brick = cad.build_brick(p)
-    gripper = Gr.build_gripper(gp, brick, p)
+    brick = cad.build_bricks(p)
+    gripper = Gr.build_gripper(gp, brick['A'], p)
     structure = S.CATALOG[sim['structure']]()
     h = Harness(p, plan, brick, gripper, structure, cfg, seed=seed, record_fps=record_fps)
     return h.run(), h

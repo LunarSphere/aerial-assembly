@@ -2,7 +2,10 @@
 
 Lengths are millimetres and angles degrees; conversion to SI happens at the
 MuJoCo boundary. The brick is a 2.5D profile in XZ spanning two voxels in X,
-extruded through the depth D in Y and sheared into a V gutter across Y.
+extruded through the depth D in Y and sheared into a V gutter across Y. There
+is one design, the A/B pair: distinct A (even courses) and B (odd courses)
+parts on an alternating body, with every tooth trailing against the build
+direction (``profile.brick_parts``).
 """
 from dataclasses import asdict, dataclass, fields, replace
 import math
@@ -30,7 +33,6 @@ class BrickParams:
     end_gap: float = 0.3        # gap between neighbours in a course
     wall: float = 1.2           # minimum wall/rib thickness for lightening holes
     lighten: bool = True        # cut through-Y lightening holes
-    lean_mode: str = 'alternate'  # 'alternate': B = A rotated; 'uniform': every course A; 'ab': distinct A/B parts, all teeth trail -x
     fork_d: float = 2.0         # fork tine (rod) diameter
     fork_clearance: float = 0.3 # radial clearance around each tine
     infill: float = 1.0         # printed mass fraction relative to solid
@@ -42,10 +44,6 @@ class BrickParams:
     barb_timeconst: float = 0.02  # contact time constant of the barb (softer = easier snap); uncalibrated
     end_scarf: float = 0.0      # end faces: 0 vertical, 1 parallel to the insertion axis
     end_step: float = 0.0       # stepped scarf: signed ledge depth (mm) on the lower half of the +x end
-
-    @property
-    def uniform(self):
-        return self.lean_mode == 'uniform'
 
     @property
     def phi(self):
@@ -67,6 +65,11 @@ class BrickParams:
 
     @classmethod
     def from_dict(cls, values):
+        values = dict(values)
+        # Configs and runs from before the A/B-only design carry a lean mode; only 'ab' still exists.
+        mode = values.pop('lean_mode', 'ab')
+        if mode != 'ab':
+            raise ValueError(f"lean_mode {mode!r} was removed; only the A/B design exists (see git history)")
         names = {f.name for f in fields(cls)}
         unknown = set(values) - names
         if unknown:

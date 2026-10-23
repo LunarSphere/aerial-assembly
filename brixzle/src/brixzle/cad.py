@@ -98,7 +98,7 @@ def _mesh(shape, tolerance=0.05):
 def build_brick(p: BrickParams, solid=True, part='A'):
     """Geometry bundle for one brick part (unrotated frame), in millimetres and grams."""
     parts = pr.brick_parts(p, part)
-    channels = pr.fork_channels(p, parts)
+    channels = pr.fork_channels(p)
     holes = pr.lightening_holes(p, parts, channels)
     outer = parts['outer']
     barbs = parts.get('barbs', [])
@@ -136,15 +136,23 @@ def build_brick(p: BrickParams, solid=True, part='A'):
 
 
 def build_bricks(p: BrickParams, solid=True):
-    """{part: bundle}: just A, or A and B in 'ab' lean mode."""
-    names = ('A', 'B') if p.lean_mode == 'ab' else ('A',)
-    return {n: build_brick(p, solid, n) for n in names}
+    """{'A': bundle, 'B': bundle}."""
+    return {n: build_brick(p, solid, n) for n in ('A', 'B')}
 
 
-def build_base(p: BrickParams, voxels, thickness=None, direction=1):
+def as_pair(brick):
+    """{'A', 'B'} bundles from one part's bundle (the other part is built to match) or a pair."""
+    if 'collision' not in brick:
+        return brick
+    p = BrickParams.from_dict(brick['params'])
+    other = 'B' if brick.get('part', 'A') == 'A' else 'A'
+    return {brick.get('part', 'A'): brick, other: build_brick(p, 'mesh' in brick, other)}
+
+
+def build_base(p: BrickParams, voxels, thickness=None, direction=1, part=None):
     """Anchored base plate (receives course 0) as collision pieces."""
     thickness = thickness or p.tooth_L + p.slot_extra + 4
-    outer, valleys = pr.base_outer(p, voxels, thickness, direction)
+    outer, valleys = pr.base_outer(p, voxels, thickness, direction, part)
     return {'outer': outer, 'collision': _pieces(outer, p), 'valleys': [v.tolist() for v in valleys],
             'voxels': voxels}
 

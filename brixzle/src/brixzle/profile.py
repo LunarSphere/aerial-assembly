@@ -1,17 +1,18 @@
-"""2D XZ profile of the brick and the anchored base, built with shapely.
+"""2D XZ profile of the A/B brick pair and the anchored base, built with shapely.
 
-The A-orientation brick spans local x in [-U, U] (two voxels, a voxel
-boundary at x=0). Its top surface is the sawtooth ``T`` raised by ``H0`` and
-its bottom surface is the mirrored sawtooth ``T'``. Rotating A by 180 degrees
-about Z gives B, whose bottom is ``T`` and whose top is ``T'``; courses
-alternate A/B, so every interface nests. Each top valley carries a slanted
-slot whose far wall continues the steep face, and each bottom keel point
-carries a matching tooth. Teeth and slots lean in opposite directions in one
-brick, which forces the alternating-angle (ABA) layering.
+A brick spans local x in [-U, U] (two voxels, a voxel boundary at x=0). The
+body alternates between the sawtooth ``T`` and its mirror ``T'``: part A has
+top T (raised by ``H0``) and bottom T', part B has top T' and bottom T, so
+A (even courses) and B (odd courses) nest without rotation. Each top valley
+carries a slanted slot and each bottom keel point a matching tooth. A's teeth
+and B's slots are *reversed* (mirrored about vertical), so every tooth tip
+trails toward -x and every joint hooks against a +x overhang. Building toward
+-x uses the other part rotated 180 degrees about Z.
 
 Profile z is the world z at y = 0; the Y gutter later shears each Y half by
 ``tan(gutter) * |y|``.
 """
+from functools import lru_cache
 import math
 
 import numpy as np
@@ -201,25 +202,18 @@ def _strip(p: BrickParams, x0, x1, top_mirrored, bottom_mirrored, bottom_offset)
     return Polygon(np.vstack([top, bottom[::-1]]))
 
 
-def brick_parts(p: BrickParams, part='A'):
-    """Outer profile (no internal holes) and feature list of a brick part.
+# (top mirrored, bottom mirrored, top slots reversed, bottom teeth reversed) per part.
+PART_FLAGS = {'A': (False, True, False, True), 'B': (True, False, True, False)}
 
-    'alternate': the A part; the bottom is the mirrored sawtooth (teeth lean
-    opposite to the top slots, forcing ABA courses; B = A rotated 180 deg).
-    'uniform': the bottom repeats the top (constant-thickness chevron; every
-    tooth leans the same way).
-    'ab': two distinct parts on the alternating body, both world-aligned. A has
-    bottom T' with reversed teeth and top T with normal slots; B has bottom T
-    with normal teeth and top T' with reversed slots. Every tooth tip trails
-    toward -x, so every joint hooks against a +x overhang.
+
+def brick_parts(p: BrickParams, part='A'):
+    """Outer profile (no internal holes) and feature list of part 'A' or 'B'.
+
+    A has bottom T' with reversed teeth and top T with normal slots; B has
+    bottom T with normal teeth and top T' with reversed slots.
     """
     U, H0 = p.U, p.H0
-    if p.lean_mode == 'ab' and part == 'B':
-        top_m, bottom_m, top_rev, bottom_rev = True, False, True, False
-    elif p.lean_mode == 'ab':
-        top_m, bottom_m, top_rev, bottom_rev = False, True, False, True
-    else:
-        top_m, bottom_m, top_rev, bottom_rev = False, not p.uniform, False, False
+    top_m, bottom_m, top_rev, bottom_rev = PART_FLAGS[part]
     # Vertical ends through the coincident top/bottom peaks: the thinnest
     # section (H0). Course neighbours tile by translation; the order planner
     # keeps the slanted final approach clear of already placed neighbours.
@@ -295,31 +289,34 @@ def channel_footprint(p: BrickParams, center):
     return LineString([(x, z - shear_drop(p)), (x, z)]).buffer(r, quad_segs=8)
 
 
-def fork_channels(p: BrickParams, parts=None, step=0.25, min_spacing=8.0):
-    """Two straight through-Y tine bores, as high as possible, >= min_spacing apart.
+def fork_channels(p: BrickParams, step=0.25, min_spacing=8.0):
+    """Two straight through-Y tine bores shared by parts A and B, as high as possible, >= min_spacing apart.
 
-    Centres are world (x, z) at y = 0. Each bore keeps ``wall`` of material
-    around its sheared footprint so a straight rod passes the full depth.
-    Returns [] when no pair fits.
+    Centres are world (x, z) at y = 0 in each part's own frame; both parts get
+    the same bores, so one fork carries either. Each bore keeps ``wall`` of
+    material around its sheared footprint in both parts so a straight rod passes
+    the full depth, and the pair straddles both parts' centres of mass so either
+    hangs level. Returns [] when no pair fits.
     """
-    parts = parts or brick_parts(p)
-    solid = parts['outer']
-    zmin, zmax = solid.bounds[1], solid.bounds[3]
+    solids = [brick_parts(p, k)['outer'] for k in PART_FLAGS]
+    zmin = max(g.bounds[1] for g in solids)
+    zmax = min(g.bounds[3] for g in solids)
     tops = []
     for x in np.arange(-p.U + step, p.U, step):
         for z in np.arange(zmax, zmin, -step):
-            if solid.contains(channel_footprint(p, (x, z)).buffer(p.wall)):
+            foot = channel_footprint(p, (x, z)).buffer(p.wall)
+            if all(g.contains(foot) for g in solids):
                 tops.append((float(x), float(z)))
                 break
-    # The pair must straddle the centre of mass so the brick hangs level.
-    cx = solid.centroid.x
+    lo = min(g.centroid.x for g in solids)
+    hi = max(g.centroid.x for g in solids)
     best, best_z = [], -np.inf
     for i, a in enumerate(tops):
         for b in tops[i+1:]:
-            straddles = a[0] + 2 <= cx <= b[0] - 2
+            straddles = a[0] + 2 <= lo and hi <= b[0] - 2
             if straddles and b[0] - a[0] >= min_spacing and min(a[1], b[1]) > best_z:
-                best, best_z = [a, b], min(a[1], b[1])
-    return best
+                best, best_z = (a, b), min(a[1], b[1])
+    return best or ()
 
 
 def lightening_holes(p: BrickParams, parts=None, channels=None):
@@ -348,20 +345,24 @@ def lightening_holes(p: BrickParams, parts=None, channels=None):
     return holes
 
 
-def base_outer(p: BrickParams, voxels, thickness=6.0, direction=1):
+def base_outer(p: BrickParams, voxels, thickness=6.0, direction=1, part=None):
     """Anchored base: top matches a course-0 brick's bottom, with slots; flat bottom.
 
-    In 'ab' mode the slots lean against the build ``direction`` (reversed for +x,
-    normal for -x, which receives a rotated B part).
+    It receives ``part`` (default: A for +x builds, B for -x builds), unrotated
+    for ``direction`` > 0 and turned 180 degrees about Z otherwise. Turning a
+    part mirrors its bottom sawtooth and keeps its tooth lean, so the slots
+    always lean against the build direction.
     """
-    m = not p.uniform
+    part = part or ('A' if direction > 0 else 'B')
+    _, m, _, rev = PART_FLAGS[part]
+    if direction < 0:
+        m = not m
     x0, x1 = 0., voxels*p.U
     xs = breakpoints(p, x0, x1, mirrored=m)
     top = np.column_stack([xs, sawtooth(p, xs, mirrored=m)])
     body = Polygon(np.vstack([top, [[x1, -thickness], [x0, -thickness]]]))
     vu = p.U - p.valley_u if m else p.valley_u
     valleys = [np.array([i*p.U + vu, 0.]) for i in range(voxels)]
-    rev = p.lean_mode == 'ab' and direction > 0
     cuts = [slot(p, v, mirrored=m, reversed=rev) for v in valleys]
     if p.lip_L > 0:
         cuts += [lip_slot(p, (i*p.U, p.amplitude), mirrored=m, reversed=rev) for i in range(voxels + 1)]

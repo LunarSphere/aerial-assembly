@@ -56,15 +56,11 @@ def _plot_profile(p, bundle, out):
         draw(ax[0], h, color='w')
     for c in bundle['channels']:
         draw(ax[0], pr.channel_footprint(p, c), color='tab:red', alpha=.6)
-    ax[0].set_title(f'{p.lean_mode} brick profile at y=0 ({bundle["mass_g"]:.1f} g)')
+    ax[0].set_title(f'{bundle.get("part", "A")} brick profile at y=0 ({bundle["mass_g"]:.1f} g)')
     base, _ = pr.base_outer(p, 5, p.tooth_L + p.slot_extra + 4)
     draw(ax[1], base, color='0.6')
     for k, starts in enumerate([[0, 2], [1, 3], [0, 2], [1]]):
-        if p.lean_mode == 'ab':
-            g = bundle['outer'] if k % 2 == 0 else pr.brick_parts(p, 'B')['outer']
-        else:
-            flip = k % 2 and not p.uniform
-            g = pr.mirror_x(bundle['outer']) if flip else bundle['outer']
+        g = pr.brick_parts(p, 'AB'[k % 2])['outer']
         for i0 in starts:
             draw(ax[1], affinity.translate(g, (i0 + 1)*p.U, k*p.H0), color=['tab:blue', 'tab:orange'][k % 2], alpha=.85)
     ax[1].set_title('running bond on anchored base')
@@ -229,13 +225,13 @@ def parser():
 
     sp = sub.add_parser('export', help='CAD solid, STL/STEP, profile plot, rule margins')
     sp.add_argument('--params')
-    sp.add_argument('--part', choices=['A', 'B'], default='A', help="'ab' lean mode has two parts")
+    sp.add_argument('--part', choices=['A', 'B'], default='A', help='brick part')
     sp.add_argument('--out', required=True)
     sp.set_defaults(func=cmd_export)
     sp = sub.add_parser('baseplate', help='n x n baseplate STL (anchored seat for course 0)')
     sp.add_argument('--params')
     sp.add_argument('--n', type=int, required=True, help='plate side in voxels')
-    sp.add_argument('--direction', type=int, choices=[1, -1], default=1, help="build direction ('ab' mode slot lean)")
+    sp.add_argument('--direction', type=int, choices=[1, -1], default=1, help='build direction (slots lean against it)')
     sp.add_argument('--thickness', type=float, help='plate thickness below the seats (mm)')
     sp.add_argument('--step', action='store_true')
     sp.add_argument('--out', required=True)
@@ -248,7 +244,7 @@ def parser():
     common(sp)
     sp.add_argument('--samples', type=int, default=64)
     sp.add_argument('--ideal', action='store_true')
-    sp.add_argument('--part', choices=['A', 'B'], default='A', help="B drops onto a seated A ('ab' mode)")
+    sp.add_argument('--part', choices=['A', 'B'], default='A', help="B drops onto a seated A")
     sp.add_argument('--video', type=int, default=0, help='render up to N failed drops (plus drop 0)')
     sp.set_defaults(func=cmd_drop)
     sp = sub.add_parser('assemble', help='sequential assembly of a catalog structure')
