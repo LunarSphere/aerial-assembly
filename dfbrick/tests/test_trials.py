@@ -31,7 +31,7 @@ def test_miss_beyond_the_ridge_is_wrong_receiver(brick):
     assert rows[0]['outcome'] == 'wrong_receiver', rows[0]
 
 
-@pytest.mark.parametrize('name,build', [('tower', lambda p: S.tower(p, 4)), ('wall', lambda p: S.wall(p, 3, 3)),
+@pytest.mark.parametrize('name,build', [('tower', lambda p: S.tower(p, 4)), ('wall', lambda p: S.wall(p, 4, 3)),
                                         ('bridge', lambda p: S.bridge(p, 2))])
 def test_ideal_structures_complete(brick, name, build):
     result, _ = T.assemble(DEFAULT, brick, build(DEFAULT), IDEAL)

@@ -80,7 +80,14 @@ def test_wide_baseline_limits_yaw_play():
 
 
 @pytest.mark.parametrize('tol', [14.8, 38.5])
-def test_sizing_covers_tolerance(tol):
+def test_sizing_covers_tolerance_and_yaw(tol):
     p = R.size_for_tolerance(tol)
-    assert R.capture(p) >= tol + 1.0
-    assert R.capture(DFParams(**{**p.to_dict(), 'U': p.U - 0.5})) < tol + 1.0
+    s = R.settings_for_tolerance(tol)
+    m = R.rules(p, cad.build_brick(p, solid=False), s)
+    assert m['capture_with_yaw'] >= 0
+    smaller = DFParams(**{**p.to_dict(), 'U': p.U - 0.5})
+    assert R.rules(smaller, cad.build_brick(smaller, solid=False), s)['capture_with_yaw'] < 0
+
+
+def test_default_is_the_mean_design():
+    assert R.size_for_tolerance(14.82) == DEFAULT

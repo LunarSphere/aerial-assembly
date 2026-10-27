@@ -23,6 +23,8 @@ class RuleSettings:
     min_feature: float = 1.2       # printable wall (3 perimeters at 0.4 mm)
     residual_tilt_deg: float = 6.  # tilt left when a foot meets its throat (as brixzle)
     max_yaw_play_deg: float = 1.   # seated yaw play allowed by the two feet
+    yaw_allowance_deg: float = 5.  # yaw the receivers must also absorb at the feet: 1 sigma of the
+                                   # (unmeasured) ErrorModel yaw
     hang_margin: float = 1.
     min_top_gap: float = 0.5       # rail above the ridges of the course below
 
@@ -47,6 +49,8 @@ def rules(p: DFParams, bundle, s: RuleSettings = RuleSettings()):
     # Coarse capture: the mouth reaches the ridge, so a foot tip anywhere inside it seats.
     # Square receivers capture the same in X and Y.
     out['capture_xy'] = capture(p) - s.placement_error
+    # A yawed brick moves each foot by about (B/2) sin(yaw) on top of the X-Y error.
+    out['capture_with_yaw'] = out['capture_xy'] - p.baseline/2*math.sin(math.radians(s.yaw_allowance_deg))
     # Entry: the chamfer plus clearance must absorb the residual tilt over the guided stroke.
     out['clearance_absorbs_tilt'] = (p.tip_chamfer + p.clearance
                                      - p.parallel_len*math.sin(math.radians(s.residual_tilt_deg)))
@@ -79,8 +83,10 @@ def violations(margins):
     return np.array([max(0., -v) for v in margins.values()])
 
 
-def size_for_tolerance(tolerance, base: DFParams = DFParams(), margin=1.0, step=0.5):
-    """Smallest voxel pitch (rounded up to ``step``) whose capture covers ``tolerance + margin``."""
+def size_for_tolerance(tolerance, base: DFParams = DFParams(), margin=0., yaw_deg=5., step=0.5):
+    """Smallest voxel pitch (rounded up to ``step``) whose capture covers the X-Y tolerance plus
+    ``margin`` plus a yaw of ``yaw_deg`` at the feet (which sit (n - 1) U / 2 from the centre)."""
+    lean = (base.n_vox - 1)/2*math.sin(math.radians(yaw_deg))
     need = tolerance + margin + (base.half_foot - base.tip_chamfer) + base.end_gap/2
-    U = math.ceil(2*need/step)*step
+    U = math.ceil(need/(0.5 - lean)/step)*step
     return replace(base, U=float(U))

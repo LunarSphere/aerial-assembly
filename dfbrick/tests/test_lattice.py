@@ -24,19 +24,18 @@ def test_y_bricks_turn_a_quarter():
 
 def test_support_graph_and_order():
     p = DEFAULT
-    s = S.wall(p, 3, 4)
+    s = S.wall(p, 4, 4)
+    assert [sum(b.course == k for b in s.bricks) for k in range(4)] == [4, 3, 2, 1]
     g = L.connectivity(p, s)
     order = L.assembly_order(p, s)
     seen = set()
     for b in order:
         assert all(u in seen for u in g.predecessors(b.name)), b.name
         seen.add(b.name)
-    # Running bond: every brick above course 0 rests on two bricks, except at the stepped ends.
+    # Running bond with both feet supported: every brick above course 0 rests on two bricks.
     for b in s.bricks:
         if b.course:
-            row = [c.i0 for c in s.bricks if c.course == b.course]
-            end = b.i0 == (max(row) if b.course % 2 else min(row))
-            assert len(set(g.predecessors(b.name))) == (1 if end else 2), b.name
+            assert len(set(g.predecessors(b.name))) == 2, b.name
 
 
 def test_bridge_key_goes_last():

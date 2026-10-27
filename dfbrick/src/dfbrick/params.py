@@ -22,7 +22,7 @@ FOOT_KINDS = ('peg', 'cup')
 
 @dataclass(frozen=True)
 class DFParams:
-    U: float = 38.             # voxel pitch (X and Y)
+    U: float = 44.5            # voxel pitch (X and Y); sized for the Exp 3 mean error (see rules)
     n_vox: int = 3             # voxels per brick; feet under the two outer ones
     bar_h: float = 3.          # rail height
     foot_w: float = 8.         # square foot width
@@ -30,13 +30,16 @@ class DFParams:
     clearance: float = 0.3     # per side between the foot and the parallel throat
     parallel_len: float = 4.   # straight throat length (guided stroke before seating)
     flare: float = 55.         # funnel wall angle from vertical
-    wall_t: float = 1.6        # funnel wall thickness (printable: 4 perimeters at 0.4 mm)
+    wall_t: float = 1.2        # funnel wall thickness (printable minimum: 3 perimeters at 0.4 mm)
     top_gap: float = 1.0       # rail clearance above the ridges of the course below
-    end_gap: float = 0.3       # between neighbouring funnels (and bricks) at a ridge
+    end_gap: float = 2.0       # between neighbouring funnels (and bricks) at a ridge; room for a
+                               # brick dropped between two placed neighbours
     foot_kind: str = 'cup'     # 'peg': square prism; 'cup': hollow shell that nests in the receiver
                                # (prism tip through the throat, then the receiver's flare, offset by
                                # the clearance), so an off-centre foot slides on the ridge, not its tip
     rib_t: float = 5.4         # Y rib thickness (X) under each inner ridge, holds a tine bore
+    rib_depth: float = 14.     # Y length of each bore: short, so a drone tilting as it withdraws the
+                               # fork does not wedge the tines (0.3 mm clearance over 14 mm ~ 2.5 deg)
     fork_d: float = 2.         # tine diameter
     fork_clearance: float = 0.3
     receiver_mode: str = 'pocket'  # 'pocket': square funnels everywhere; 'pocket-slot': voxel 0 a
@@ -57,7 +60,7 @@ class DFParams:
             raise ValueError('n_vox must be an integer >= 2')
         if not 0 < self.flare < 90:
             raise ValueError('flare must be in (0, 90) degrees from vertical')
-        positive = ('U', 'bar_h', 'foot_w', 'parallel_len', 'wall_t', 'rib_t', 'fork_d', 'infill')
+        positive = ('U', 'bar_h', 'foot_w', 'parallel_len', 'wall_t', 'rib_t', 'rib_depth', 'fork_d', 'infill')
         if any(getattr(self, k) <= 0 for k in positive):
             raise ValueError(f'{positive} must be > 0')
         if min(self.clearance, self.tip_chamfer, self.top_gap, self.end_gap, self.fork_clearance) < 0:

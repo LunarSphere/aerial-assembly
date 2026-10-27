@@ -19,12 +19,19 @@ def tower(p: DFParams, h=6):
 def wall(p: DFParams, width=3, courses=4):
     """Running bond: odd courses shift one voxel, so every inner joint is straddled by two feet.
 
-    Odd courses step out one voxel at the +x end; that brick keeps its COM over the one below.
+    A DF brick bears only on its two feet, so a course keeps only bricks with both feet over the
+    course below; with no half bricks the wall steps in at the ends (3, 2, 1, ... bricks).
     """
     n = p.n_vox
-    bricks = []
+    bricks, below = [], None
     for k in range(courses):
-        bricks += [Placement(k, m*n + (k % 2)) for m in range(width)]
+        row = [Placement(k, m*n + (k % 2)) for m in range(width)]
+        if below is not None:
+            row = [b for b in row if all(c in below for c in (b.i0, b.i0 + n - 1))]
+        if not row:
+            break
+        bricks += row
+        below = {b.i0 + d for b in row for d in range(n)}
     return Structure('wall', bricks)
 
 
@@ -65,6 +72,6 @@ def ring(p: DFParams, side=7, courses=4):
 
 
 def catalog(p: DFParams):
-    return {'tower': lambda: tower(p, 6), 'wall': lambda: wall(p, 3, 4), 'bridge': lambda: bridge(p, 2),
+    return {'tower': lambda: tower(p, 6), 'wall': lambda: wall(p, 4, 4), 'bridge': lambda: bridge(p, 2),
             'overhang+': lambda: overhang(p, 12, +1), 'overhang-': lambda: overhang(p, 12, -1),
             'ring': lambda: ring(p, 7, 4)}

@@ -140,9 +140,13 @@ def channels(p: DFParams):
 
 
 def rib_pieces(p: DFParams, bored=False):
-    """Under each inner ridge: a band across the full depth around the bore, on a post over the rail."""
-    top, E, half = rib_top(p), p.extent, p.rib_t/2
+    """Under each inner ridge: a band ``rib_depth`` long in Y around the bore, on a post over the rail.
+
+    The tines run through the bands only; elsewhere they pass under the funnels in free space.
+    """
+    top, half = rib_top(p), p.rib_t/2
     r, wy = bore_radius(p), rail_width(p)/2
+    yb = max(p.rib_depth/2, wy)
     zb = channels(p)[0][1]
     band = zb - r - 1.2
     xs = [p.voxel_x(i) + p.U/2 for i in range(p.n_vox - 1)]
@@ -151,13 +155,13 @@ def rib_pieces(p: DFParams, bored=False):
     for xb in xs:
         out.append(_box(xb - half, xb + half, -wy, wy, 0., band))
         if round(xb, 6) not in bored_x:
-            out.append(_box(xb - half, xb + half, -E, E, band, top))
+            out.append(_box(xb - half, xb + half, -yb, yb, band, top))
             continue
         # Square hole around the bore, as brixzle.cad.bored_pieces.
-        out += [_box(xb - half, xb + half, -E, E, band, zb - r),
-                _box(xb - half, xb + half, -E, E, zb + r, top),
-                _box(xb - half, xb - r, -E, E, zb - r, zb + r),
-                _box(xb + r, xb + half, -E, E, zb - r, zb + r)]
+        out += [_box(xb - half, xb + half, -yb, yb, band, zb - r),
+                _box(xb - half, xb + half, -yb, yb, zb + r, top),
+                _box(xb - half, xb - r, -yb, yb, zb - r, zb + r),
+                _box(xb + r, xb + half, -yb, yb, zb - r, zb + r)]
     return out
 
 
