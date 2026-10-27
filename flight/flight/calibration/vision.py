@@ -61,6 +61,39 @@ def _candidate_poses(world, pixels, intrinsics):
     return candidates[0]
 
 
+def drone_tag(found, tag, intrinsics, transform):
+    """Lighthouse-frame centre of the tag on the drone, from its own corners and printed size.
+
+    Single-tag IPPE: of the two planar solutions, keep the lower reprojection error. Both
+    place the centre at nearly the same point; they differ mostly in the tag's tilt.
+    Returns None when the tag is not in view.
+    """
+    if tag['id'] not in found:
+        return None
+    c = cv()
+    pixels = np.ascontiguousarray(found[tag['id']], float)
+    local = corners(dict(tag, pose=dict(pos=[0., 0., 0.], quat=[1., 0., 0., 0.])))
+    k = np.asarray(intrinsics['matrix'], float)
+    ok, rs, ts, _ = c.solvePnPGeneric(local, ideal_pixels(pixels, intrinsics), k, np.zeros(5),
+                                      flags=c.SOLVEPNP_IPPE_SQUARE)
+    if not ok:
+        raise ValueError(f'Drone tag {tag["id"]}: pose estimation failed')
+    candidates = []
+    for rvec, tvec in zip(rs, ts):
+        rms = float(np.sqrt(np.mean(np.sum((project_points(local, rvec, tvec, intrinsics)-pixels)**2, axis=1))))
+        candidates.append((rms, rvec, tvec.reshape(3)))
+    rms, rvec, tvec = min(candidates, key=lambda v: v[0])
+    if tvec[2] <= 0:
+        raise ValueError(f'Drone tag {tag["id"]}: pose is behind the camera')
+    pose = Pose.from_dict(transform)
+    normal = pose.rotate(c.Rodrigues(rvec)[0][:, 2])
+    return dict(drone_tag_world_m=pose.apply(tvec).tolist(),
+                drone_tag=dict(id=tag['id'], size_m=tag['size_m'], center_px=pixels.mean(axis=0).tolist(),
+                               point_camera_m=tvec.tolist(), reprojection_rms_px=rms,
+                               tilt_deg=float(np.degrees(np.arccos(np.clip(normal[2], -1., 1.)))),
+                               candidate_spread_m=float(max(np.linalg.norm(t.reshape(3)-tvec) for t in ts))))
+
+
 def solve(rig, observations, intrinsics):
     """Fit reference tags only; reconstruct check centres independently by calibrated PnP."""
     c = cv()

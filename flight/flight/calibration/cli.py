@@ -78,6 +78,18 @@ def parser():
     p.add_argument('--dwell-s', type=float, default=5., help='hold over each tag centre, 0–30 seconds (default 5)')
     p.add_argument('--resume', help='existing session directory to continue (instead of --out)')
     p.add_argument('--save-metrics', action='store_true', help='write metrics.json and approach-errors.png after every trial')
+    p.add_argument('--drone-tag-id', type=int, help='AprilTag (same family as the floor tags) mounted on the drone over the deck centre')
+    p.add_argument('--drone-tag-size-m', type=float, help='printed black-square edge of the drone tag, metres')
+    p = commands.add_parser('drone-tag-check', help='camera only, no radio: how reliably the camera sees the AprilTag on the drone')
+    p.add_argument('--setup', help='completed compact setup directory; fills rig, calibration and camera settings')
+    p.add_argument('--rig')
+    p.add_argument('--calibration', help='accepted camera session directory')
+    p.add_argument('--out', required=True, help='new output directory')
+    p.add_argument('--drone-tag-id', type=int, required=True)
+    p.add_argument('--drone-tag-size-m', type=float, required=True, help='printed black-square edge, metres')
+    p.add_argument('--frames', type=int, default=150, help='frames to measure, 1–3000 (default 150, about 5 s at 30 fps)')
+    p.add_argument('--demo', action='store_true', help='use live intrinsics if the lens mapping drifted')
+    camera_arguments(p)
     p = commands.add_parser('approach-metrics', help='offline: rebuild Exp 3 metrics.json and plot from a session directory')
     p.add_argument('session')
     p = commands.add_parser('devices', help='list connected RealSense cameras')
@@ -94,6 +106,20 @@ def devices(args):
         raise RuntimeError('Install flight[realsense] to enumerate RealSense devices') from e
     return [dict(name=d.get_info(rs.camera_info.name), serial=d.get_info(rs.camera_info.serial_number))
             for d in rs.context().query_devices()]
+
+
+def apply_setup(args):
+    """Fill rig, Lighthouse, calibration and camera settings from a completed compact setup."""
+    setup = Path(args.setup)
+    status = artifacts.read(setup/'report.json')
+    if status.get('kind') != 'setup' or not (status.get('accepted') and status.get('completed')):
+        raise ValueError('Select a completed setup')
+    args.rig, args.lighthouse, args.calibration = (str(setup/'rig.json'), str(setup/'lighthouse'), str(setup/'camera'))
+    args.uri = getattr(args, 'uri', None) or status['uri']
+    profile = artifacts.read(setup/'camera/report.json')['profile']
+    args.device = profile['device']
+    args.width, args.height, args.fps = profile['width'], profile['height'], profile.get('fps', 30)
+    args.depth_width = 640 if args.fps == 15 else 848
 
 
 def main(argv=None):
@@ -135,6 +161,17 @@ def main(argv=None):
                                      f'n={overall["n"]}' if overall['n'] else 'no measurements')
                       + f', missing {summary["missing"]}')
             print(f'Metrics: {Path(args.session)/"metrics.json"}')
+        elif args.command == 'drone-tag-check':
+            if args.setup:
+                apply_setup(args)
+            if not (args.rig and args.calibration):
+                raise ValueError('Use --setup DIRECTORY, or provide --rig and --calibration')
+            from .accuracy import drone_tag_check
+            report = drone_tag_check(args, rig.load(args.rig))
+            print(f'Drone tag {report["drone_tag"]["id"]}: seen in {report["detected"]}/{report["frames"]} frames'
+                  + (f', X-Y spread {report["xy_std_m"]*1000:.1f} mm, height {report["height_m"]:.3f} m, '
+                     f'reprojection {report["reprojection_rms_px"]:.2f} px' if report['detected'] else '')
+                  + f'. Report: {Path(args.out)/"drone-tag-check.json"}')
         elif args.command == 'devices':
             print(json.dumps(devices(args), indent=2))
         elif args.command == 'replay-lighthouse':
@@ -148,17 +185,7 @@ def main(argv=None):
         else:
             if args.command in ('hover-check', 'tag-visit', 'approach-accuracy'):
                 if args.setup:
-                    setup = Path(args.setup)
-                    status = artifacts.read(setup/'report.json')
-                    if status.get('kind') != 'setup' or not (status.get('accepted') and status.get('completed')):
-                        raise ValueError('Select a completed setup')
-                    args.rig, args.lighthouse, args.calibration = (str(setup/'rig.json'), str(setup/'lighthouse'), str(setup/'camera'))
-                    args.uri = args.uri or status['uri']
-                    calibration = artifacts.read(setup/'camera/report.json')
-                    profile = calibration['profile']
-                    args.device = profile['device']
-                    args.width, args.height, args.fps = profile['width'], profile['height'], profile.get('fps', 30)
-                    args.depth_width = 640 if args.fps == 15 else 848
+                    apply_setup(args)
                 if not (args.rig and args.lighthouse and args.calibration):
                     raise ValueError('Use --setup DIRECTORY, or provide --rig, --lighthouse and --calibration')
             survey = rig.load(args.rig)

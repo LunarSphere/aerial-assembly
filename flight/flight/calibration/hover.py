@@ -258,13 +258,18 @@ def camera_worker(args, rig, calibration, queue, stop, out):
                 calibration = dict(calibration, T_lighthouse_camera=registration['T_lighthouse_camera'])
             inv = Pose.from_dict(calibration['T_lighthouse_camera']).inverse()
             detector = None
-            if calibration.get('detector_model') and not getattr(args, 'camera_check_only', False):
+            # The drone tag (issue #40) replaces the detector as the camera's measure of the drone.
+            if (calibration.get('detector_model') and not getattr(args, 'camera_check_only', False)
+                    and getattr(args, 'drone_tag_id', None) is None):
                 from .drone import NanoDetector, observe
                 detector = NanoDetector(calibration['detector_model'])
             from scipy.spatial.transform import Rotation
             from ..frames import wxyz_to_xyzw
             rv = Rotation.from_quat(wxyz_to_xyzw(inv.quat)).as_rotvec()
             k, d = np.array(camera.intrinsics['matrix']), np.array(camera.intrinsics['distortion'])
+            if getattr(args, 'drone_tag_id', None) is not None:
+                from .vision import drone_tag
+                tag = dict(id=args.drone_tag_id, size_m=args.drone_tag_size_m)
             saved, last_saved = 0, -math.inf
             start_pose = inv.inverse()
             while not stop.is_set():
@@ -286,6 +291,12 @@ def camera_worker(args, rig, calibration, queue, stop, out):
                 if len(errors) < 8 or status['alignment_rms_px'] > 2.:
                     status['error'] = (f'Camera/tag projection mismatch ({status["alignment_rms_px"]} px); '
                                        'use --demo to refresh the camera pose against fixed tags')
+                if getattr(args, 'drone_tag_id', None) is not None:
+                    # Measured from the tag's own corners, independent of the detector and depth.
+                    try:
+                        status.update(drone_tag(found, tag, camera.intrinsics, inv.inverse().to_dict()) or {})
+                    except ValueError as e:
+                        status['drone_tag_warning'] = str(e)
                 if detector is not None:
                     try:
                         # Demo flight uses Lighthouse position; depth on propellers/background

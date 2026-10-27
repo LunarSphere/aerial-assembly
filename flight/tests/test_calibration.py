@@ -725,6 +725,116 @@ def test_approach_errors_from_settled_dwells():
     assert accuracy.approaches(synthetic_trial_events()[:6], SYNTHETIC_CENTRES, trial=1) == []
 
 
+def drone_tag_event(t, xy, height=.23):
+    return dict(event='camera', t=t, time=t, drone_tag_world_m=[*xy, height], drone_tag=dict(id=10))
+
+
+def drone_tag_trial_events():
+    # Detection frames at 8 and 10 s are ignored once the drone carries a tag.
+    return sorted(synthetic_trial_events()+[drone_tag_event(8.5, [.006, .008]), drone_tag_event(9.5, [.006, .008]),
+                                            drone_tag_event(14., [.5, .5])],
+                  key=lambda e: e['t'])
+
+
+def test_drone_tag_replaces_detection_for_positioning_error():
+    from flight.calibration import accuracy
+    first, second = accuracy.approaches(drone_tag_trial_events(), SYNTHETIC_CENTRES, trial=1, source='drone_tag')
+    np.testing.assert_allclose(first['camera_xy_m'], [.006, .008])
+    np.testing.assert_allclose(first['positioning_error_xy_m'], [.006, .008], atol=1e-12)
+    assert first['positioning_error_m'] == pytest.approx(math.sqrt(.006**2+.008**2))
+    assert (first['camera_frames'], first['deck_height_m']) == (2, pytest.approx(.23))
+    assert first['positioning_source'] == 'drone_tag'
+    np.testing.assert_allclose(first['control_error_xy_m'], [.01, .01])
+    assert second['positioning_error_xy_m'] is None and second['camera_frames'] == 0
+    pad = [telemetry_event(-1., [1., 1.]), drone_tag_event(-.5, [.002, 0.]), *synthetic_trial_events()]
+    np.testing.assert_allclose(accuracy.launch_offset(pad, 1, source='drone_tag')['offset_xy_m'], [.998, 1.])
+    # Earlier sessions keep the detection box centre.
+    detection = accuracy.approaches(drone_tag_trial_events(), SYNTHETIC_CENTRES, trial=1)[0]
+    np.testing.assert_allclose(detection['positioning_error_xy_m'], [.03, -.04], atol=1e-12)
+    with pytest.raises(ValueError, match='source'):
+        accuracy.approaches(drone_tag_trial_events(), SYNTHETIC_CENTRES, trial=1, source='sam')
+
+
+def test_metrics_use_the_drone_tag_when_the_session_set_one(tmp_path):
+    import json
+    from flight.calibration import accuracy
+    root = synthetic_session(tmp_path/'session')
+    session = artifacts.read(root/'session.json')
+    artifacts.write(root/'session.json', dict(session, settings=dict(drone_tag=dict(id=10, size_m=.04))))
+    (root/'trial-01'/'events.jsonl').write_text(''.join(json.dumps(e)+'\n' for e in drone_tag_trial_events()))
+    with patch.object(accuracy, 'plot'):
+        metrics = accuracy.write_metrics(root)
+    assert metrics['positioning_source'] == 'drone_tag' and metrics['drone_tag'] == dict(id=10, size_m=.04)
+    assert 'AprilTag' in metrics['error_definitions']['positioning']
+    assert metrics['summary']['positioning']['overall']['mean_error_m'] == pytest.approx(.01)
+
+
+def drone_tag_corners(view, position, yaw_deg=30., size=.04):
+    transform, intrinsics, _ = view
+    tag = dict(id=10, size_m=size, pose=dict(pos=position, quat=xyzw_to_wxyz(
+        Rotation.from_euler('z', yaw_deg, degrees=True).as_quat())))
+    inverse = transform.inverse()
+    rv = Rotation.from_quat(wxyz_to_xyzw(inverse.quat)).as_rotvec()
+    return camera.project_points(rig.corners(tag), rv, np.array(inverse.pos), intrinsics)
+
+
+def test_drone_tag_position_from_its_own_corners(view):
+    transform, intrinsics, observations = view
+    found = {**observations, 10: drone_tag_corners(view, [.3, .4, .2])}
+    result = vision.drone_tag(found, dict(id=10, size_m=.04), intrinsics, transform.to_dict())
+    np.testing.assert_allclose(result['drone_tag_world_m'], [.3, .4, .2], atol=1e-6)
+    assert result['drone_tag']['reprojection_rms_px'] < 1e-4
+    assert result['drone_tag']['tilt_deg'] < .01
+    assert vision.drone_tag(observations, dict(id=10, size_m=.04), intrinsics, transform.to_dict()) is None
+    # A wrong printed size scales the range along the ray, so the height (and X-Y off-axis) are wrong.
+    wrong = vision.drone_tag(found, dict(id=10, size_m=.05), intrinsics, transform.to_dict())
+    assert abs(wrong['drone_tag_world_m'][2]-.2) > .2
+
+
+def test_drone_tag_check_reports_detection_rate_with_camera_only(tmp_path, survey, view):
+    from flight.calibration import accuracy
+    transform, intrinsics, observations = view
+    ca = artifacts.session(tmp_path/'ca', 'camera', survey)
+    artifacts.report(ca, accepted=True, T_lighthouse_camera=transform.to_dict(), profile=intrinsics['profile'])
+    artifacts.write(ca/'intrinsics.json', intrinsics)
+    artifacts.write(tmp_path/'rig.json', survey)
+    tag = drone_tag_corners(view, [.3, .4, .2])
+    views = [{**observations, 10: tag} if i % 2 else dict(observations) for i in range(20)]  # every other frame missed
+    fake = MagicMock(profile=intrinsics['profile'], intrinsics=intrinsics)
+    fake.frame.side_effect = [camera.Frame(np.zeros((720, 1280, 3), np.uint8), float(i)) for i in range(40)]
+    args = SimpleNamespace(calibration=str(ca), out=str(tmp_path/'check'), drone_tag_id=10, drone_tag_size_m=.04,
+                           frames=20, demo=False)
+    with patch('flight.calibration.camera.open_camera', return_value=fake), \
+            patch('flight.calibration.vision.detect', side_effect=views), \
+            patch('flight.hardware.connect', side_effect=AssertionError('radio opened')):
+        report = accuracy.drone_tag_check(args, survey)
+    fake.close.assert_called_once()
+    assert (report['frames'], report['detected']) == (20, 10)
+    assert report['detection_rate'] == pytest.approx(.5)
+    np.testing.assert_allclose(report['xy_m'], [.3, .4], atol=1e-6)
+    assert report['xy_std_m'] < 1e-6 and report['height_m'] == pytest.approx(.2, abs=1e-6)
+    assert report['radio_connected'] is False
+    assert artifacts.read(tmp_path/'check'/'drone-tag-check.json') == report
+    with pytest.raises(ValueError, match='new --out'):
+        accuracy.drone_tag_check(args, survey)
+    command = ['drone-tag-check', '--rig', str(tmp_path/'rig.json'), '--calibration', str(ca),
+               '--out', str(tmp_path/'floor'), '--drone-tag-id', '0', '--drone-tag-size-m', '.04']
+    assert cli.main(command) == 1 and not (tmp_path/'floor').exists()
+
+
+def test_drone_tag_settings_are_validated_and_recorded(tmp_path, survey, view):
+    files = calibrated_files(tmp_path, survey, view)
+    run = ['approach-accuracy', *files, '--demo', '--out']
+    assert cli.main([*run, str(tmp_path/'a'), '--drone-tag-id', '0', '--drone-tag-size-m', '.04']) == 1  # floor tag
+    assert cli.main([*run, str(tmp_path/'b'), '--drone-tag-id', '10']) == 1  # size required
+    assert cli.main([*run, str(tmp_path/'c'), '--drone-tag-id', '10', '--drone-tag-size-m', '0']) == 1
+    assert not any((tmp_path/d).exists() for d in 'abc')
+    assert cli.main([*run, str(tmp_path/'d'), '--drone-tag-id', '10', '--drone-tag-size-m', '.04']) == 0
+    assert artifacts.read(tmp_path/'d'/'session.json')['settings']['drone_tag'] == dict(id=10, size_m=.04)
+    assert cli.main([*run, str(tmp_path/'e')]) == 0
+    assert 'drone_tag' not in artifacts.read(tmp_path/'e'/'session.json')['settings']
+
+
 def test_summary_statistics_match_hand_calculation():
     from flight.calibration import accuracy
     rows = [dict(tag_id=0, control_error_xy_m=[.03, .04], positioning_error_xy_m=None),
