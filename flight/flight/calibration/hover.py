@@ -258,20 +258,18 @@ def camera_worker(args, rig, calibration, queue, stop, out):
                 calibration = dict(calibration, T_lighthouse_camera=registration['T_lighthouse_camera'])
             inv = Pose.from_dict(calibration['T_lighthouse_camera']).inverse()
             detector = None
-            # The drone tag (issue #40) replaces the detector as the camera's measure of the drone.
+            # The drone marker (issue #40) replaces the detector as the camera's measure of the drone.
             if (calibration.get('detector_model') and not getattr(args, 'camera_check_only', False)
-                    and getattr(args, 'drone_tag_size_m', None) is None):
+                    and not getattr(args, 'drone_marker', False)):
                 from .drone import NanoDetector, observe
                 detector = NanoDetector(calibration['detector_model'])
             from scipy.spatial.transform import Rotation
             from ..frames import wxyz_to_xyzw
             rv = Rotation.from_quat(wxyz_to_xyzw(inv.quat)).as_rotvec()
             k, d = np.array(camera.intrinsics['matrix']), np.array(camera.intrinsics['distortion'])
-            drone_square = None
-            if getattr(args, 'drone_tag_size_m', None) is not None:
-                from .vision import drone_tag
-                drone_square = dict(size_m=args.drone_tag_size_m)
-                floor_z = float(np.mean([t['pose']['pos'][2] for t in rig['tags']]))
+            if getattr(args, 'drone_marker', False):
+                from .vision import drone_marker
+                marker = dict(hue=list(args.drone_marker_hue))
             saved, last_saved = 0, -math.inf
             start_pose = inv.inverse()
             while not stop.is_set():
@@ -293,13 +291,10 @@ def camera_worker(args, rig, calibration, queue, stop, out):
                 if len(errors) < 8 or status['alignment_rms_px'] > 2.:
                     status['error'] = (f'Camera/tag projection mismatch ({status["alignment_rms_px"]} px); '
                                        'use --demo to refresh the camera pose against fixed tags')
-                if drone_square is not None:
-                    # The tag's white square, independent of the detector and depth; X-Y is set offline.
-                    try:
-                        status.update(drone_tag(frame.color, found, drone_square, camera.intrinsics,
-                                                inv.inverse().to_dict(), floor_z) or {})
-                    except ValueError as e:
-                        status['drone_tag_warning'] = str(e)
+                if getattr(args, 'drone_marker', False):
+                    # The coloured marker, independent of the detector and depth; X-Y is set offline.
+                    status.update(drone_marker(frame.color, marker, camera.intrinsics, inv.inverse().to_dict(),
+                                                exclude=found.values()))
                 if detector is not None:
                     try:
                         # Demo flight uses Lighthouse position; depth on propellers/background

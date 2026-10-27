@@ -2,8 +2,8 @@
 
 Positioning error is the camera-measured drone position minus the surveyed tag centre;
 control error is the Lighthouse-reported deck position minus the commanded centre.
-The camera measures the drone by the white square of the small tag on it when the session sets
-one (issue #40), otherwise, for earlier sessions, by the detection box centre.
+The camera measures the drone by a coloured marker (sticker) on its Lighthouse deck when the
+session sets one (issue #40), otherwise, for earlier sessions, by the detection box centre.
 Everything is computed from saved run files, so metrics can be regenerated offline.
 """
 import copy
@@ -22,7 +22,7 @@ SETTLE_S = .5  # hover.execute starts its settled window 0.5 s after each segmen
 SURVEY_WARNING_M = .01
 DEFAULT_TRIALS = 5
 ERROR_TYPES = ('positioning', 'control')
-DRONE_TAG_GATE_M = .05  # white-square candidates farther than this from Lighthouse are not the drone
+DRONE_MARKER_GATE_M = .05  # marker candidates farther than this from Lighthouse are not the drone
 SHARED_LIMITATIONS = [
     'The camera pose is refit to the floor tags every frame, so surveyed centres match rig.json by construction '
     'and camera motion does not bias positioning error.',
@@ -32,20 +32,20 @@ LIMITATIONS = dict(
     detection=['Drone tilt is ignored: the detection centre is treated as the point straight above the deck centre.',
                'The camera measures the visual centre of the detection box, not the Lighthouse deck sensor centre.',
                *SHARED_LIMITATIONS],
-    drone_tag=['The drone tag is about 10 px across and cannot be decoded; it is located as a bright square '
-               'blob, so prop blur, shadows or uneven lighting on the white square can shift its centroid.',
-               'The tag height is Lighthouse Z plus the measured tag height above the deck; a height error moves '
-               'X-Y along the camera ray (by the error times the ray slope).',
-               'Drone tilt shifts the tag X-Y by its height above the deck centre times sin(tilt).',
-               'Any X-Y offset between the mounted tag centre and the deck centre appears as a constant bias.',
-               f'Lighthouse picks which white-square candidate is the drone: the nearest within '
-               f'{DRONE_TAG_GATE_M*100:.0f} cm. A larger camera-Lighthouse disagreement counts as gated out, not '
-               'as an error.',
+    drone_marker=['The marker is a few pixels across and found by colour; prop blur, shadows or lighting can '
+                  'shift its centroid.',
+                  'The marker height is Lighthouse Z plus --drone-marker-height-m (default 0: the firmware places '
+                  'the Lighthouse position in the deck sensor plane, and the sticker is on the deck). A height '
+                  'error moves X-Y along the camera ray, by the error times the ray slope.',
+                  'Drone tilt shifts the marker X-Y by its height above the deck sensor plane times sin(tilt).',
+                  'Any X-Y offset between the sticker centre and the deck centre appears as a constant bias.',
+                  f'Lighthouse picks which candidate is the drone: the nearest within {DRONE_MARKER_GATE_M*100:.0f} '
+                  'cm. A larger camera-Lighthouse disagreement counts as gated out, not as an error.',
                *SHARED_LIMITATIONS])
 POSITIONING = dict(
     detection='camera deck centre (ray meeting the median depth height) minus surveyed tag centre',
-    drone_tag='white tag square centroid ray meeting the plane at Lighthouse Z plus tag height '
-              '(candidate nearest Lighthouse), minus surveyed tag centre')
+    drone_marker='coloured marker centroid ray meeting the plane at Lighthouse Z plus marker height '
+                 '(candidate nearest Lighthouse), minus surveyed tag centre')
 
 
 def survey_tags(observations, T_lighthouse_camera, intrinsics, rig):
@@ -97,55 +97,55 @@ def deck_xy(frames):
                 depth_xy_m=points[:, :2].mean(axis=0).tolist(), deck_height_m=height, frames=len(frames))
 
 
-def drone_tag_point(frame, height, near_xy, gate_m=DRONE_TAG_GATE_M):
-    """X-Y of the frame's white-square candidate nearest ``near_xy`` at ``height``, within the gate."""
+def drone_marker_point(frame, height, near_xy, gate_m=DRONE_MARKER_GATE_M):
+    """X-Y of the frame's marker candidate nearest ``near_xy`` at ``height``, within the gate."""
     best = None
-    for candidate in frame['drone_tag_candidates']:
-        xy = plane_xy(frame['drone_tag_origin_m'], candidate['direction'], height)
+    for candidate in frame['drone_marker_candidates']:
+        xy = plane_xy(frame['drone_marker_origin_m'], candidate['direction'], height)
         distance = np.linalg.norm(xy-near_xy)
         if distance <= gate_m and (best is None or distance < best[0]):
             best = (distance, xy)
     return None if best is None else best[1]
 
 
-def drone_tag_xy(frames, tag, lighthouse_xy, lighthouse_z):
-    """Drone X-Y from white-square rays meeting a plane at the tag's height.
+def drone_marker_xy(frames, marker, lighthouse_xy, lighthouse_z):
+    """Drone X-Y from marker rays meeting a plane at the marker's height.
 
-    The tag is too small for its own range, so its height is the median Lighthouse Z plus the
-    tag's measured height above the deck. Lighthouse also picks which candidate is the drone
-    (the nearest within the gate); the X-Y itself is the camera's.
+    The marker height is the median Lighthouse Z plus its height above the deck sensor plane.
+    Lighthouse also picks which candidate is the drone (the nearest within the gate); the X-Y
+    itself is the camera's.
     """
     if not len(lighthouse_z) or not len(lighthouse_xy):
         return None
-    height = float(np.median(lighthouse_z))+tag['height_m']
+    height = float(np.median(lighthouse_z))+marker['height_m']
     near = np.mean(lighthouse_xy, axis=0)
-    points = [p for p in (drone_tag_point(f, height, near) for f in frames) if p is not None]
+    points = [p for p in (drone_marker_point(f, height, near) for f in frames) if p is not None]
     return dict(xy_m=np.mean(points, axis=0).tolist() if points else None, depth_xy_m=None,
                 deck_height_m=height, frames=len(points), gated_out=len(frames)-len(points))
 
 
-def camera_frames(events, tag=None):
+def camera_frames(events, marker=None):
     """Camera statuses that measured the drone, one per capture time (the monitor may re-emit one)."""
-    keys = ('drone_tag_candidates',) if tag else ('drone_ray_world_m', 'drone_world_m')
+    keys = ('drone_marker_candidates',) if marker else ('drone_ray_world_m', 'drone_world_m')
     return sorted({e['time']: e for e in events if e.get('event') == 'camera'
                    and all(k in e for k in keys)}.items())
 
 
-def drone_xy(frames, tag, lighthouse_xy, lighthouse_z):
-    return drone_tag_xy(frames, tag, lighthouse_xy, lighthouse_z) if tag else deck_xy(frames)
+def drone_xy(frames, marker, lighthouse_xy, lighthouse_z):
+    return drone_marker_xy(frames, marker, lighthouse_xy, lighthouse_z) if marker else deck_xy(frames)
 
 
-def approaches(events, centres, trial, drone_tag=None):
+def approaches(events, centres, trial, drone_marker=None):
     """One row per tag dwell that completed: Lighthouse and camera X-Y over the settled window.
 
-    With ``drone_tag`` (the session setting) the camera measures the drone by the white tag
+    With ``drone_marker`` (the session setting) the camera measures the drone by the coloured
     square on it; without, as in sessions before issue #40, by the detection box centre.
     """
     centres = {int(k): v for k, v in centres.items()}
     targets = [e for e in events if e.get('event') == 'target']
     telemetry = [(e['host_time'], e['values']) for e in events
                  if e.get('event') == 'telemetry' and 'stateEstimate.x' in e['values']]
-    cameras = camera_frames(events, drone_tag)
+    cameras = camera_frames(events, drone_marker)
     rows = []
     for i, target in enumerate(targets):
         if 'tag_id' not in target:
@@ -162,7 +162,7 @@ def approaches(events, centres, trial, drone_tag=None):
         lighthouse = np.array([[v['stateEstimate.x'], v['stateEstimate.y']] for v in window], float).reshape(-1, 2)
         lighthouse_z = [v['stateEstimate.z'] for v in window if 'stateEstimate.z' in v]
         frames = [e for t, e in cameras if start <= t <= end]
-        row = dict(trial=trial, tag_id=tag, positioning_source='drone_tag' if drone_tag else 'detection',
+        row = dict(trial=trial, tag_id=tag, positioning_source='drone_marker' if drone_marker else 'detection',
                    tag_centre_xy_m=centre.tolist(), commanded_xy_m=commanded.tolist(),
                    lighthouse_samples=len(lighthouse), camera_frames=len(frames), camera_gated_out=None,
                    lighthouse_xy_m=None, camera_xy_m=None, camera_depth_xy_m=None, deck_height_m=None,
@@ -173,8 +173,8 @@ def approaches(events, centres, trial, drone_tag=None):
             error = reported-commanded
             row.update(lighthouse_xy_m=reported.tolist(), control_error_xy_m=error.tolist(),
                        control_error_m=float(np.linalg.norm(error)))
-        deck = drone_xy(frames, drone_tag, lighthouse, lighthouse_z) if frames else None
-        if deck and drone_tag:
+        deck = drone_xy(frames, drone_marker, lighthouse, lighthouse_z) if frames else None
+        if deck and drone_marker:
             row.update(camera_frames=deck['frames'], camera_gated_out=deck['gated_out'])
         if deck and deck['xy_m'] is not None:
             # sqrt((x_drone - x_tag)^2 + (y_drone - y_tag)^2), with the drone at its mean over the dwell.
@@ -188,7 +188,7 @@ def approaches(events, centres, trial, drone_tag=None):
     return rows
 
 
-def launch_offset(events, trial, drone_tag=None):
+def launch_offset(events, trial, drone_marker=None):
     """Before takeoff: Lighthouse pad position minus the camera's (tag-frame) pad position.
 
     The camera is refit to the floor tags, so a change in this offset between trials means the
@@ -201,8 +201,8 @@ def launch_offset(events, trial, drone_tag=None):
     pad = [e['values'] for e in events if e.get('event') == 'telemetry' and 'stateEstimate.x' in e['values']
            and e['host_time'] < takeoff]
     lighthouse = np.array([[v['stateEstimate.x'], v['stateEstimate.y']] for v in pad], float).reshape(-1, 2)
-    frames = [e for t, e in camera_frames(events, drone_tag) if t < takeoff]
-    deck = drone_xy(frames, drone_tag, lighthouse, [v['stateEstimate.z'] for v in pad if 'stateEstimate.z' in v]) \
+    frames = [e for t, e in camera_frames(events, drone_marker) if t < takeoff]
+    deck = drone_xy(frames, drone_marker, lighthouse, [v['stateEstimate.z'] for v in pad if 'stateEstimate.z' in v]) \
         if frames else None
     if not len(lighthouse) or not deck or deck['xy_m'] is None:
         return dict(trial=trial, lighthouse_xy_m=None, camera_xy_m=None, offset_xy_m=None, offset_m=None)
@@ -283,8 +283,8 @@ def write_metrics(session_dir):
     if session.get('kind') != 'approach-accuracy':
         raise ValueError(f'{root} is not an approach-accuracy session')
     surveys = {c['index']: artifacts.read(root/c['survey']) for c in calibrations(session)}
-    tag = session.get('settings', {}).get('drone_tag')
-    source = 'drone_tag' if tag else 'detection'
+    marker = session.get('settings', {}).get('drone_marker')
+    source = 'drone_marker' if marker else 'detection'
     rows, included, excluded, launches = [], [], [], []
     for trial in session['trials']:
         if not trial.get('accepted'):
@@ -292,14 +292,14 @@ def write_metrics(session_dir):
             continue
         events = [json.loads(line) for line in (root/trial['dir']/'events.jsonl').read_text().splitlines()]
         calibration = trial.get('calibration', 1)
-        trial_rows = approaches(events, centres(surveys[calibration]), trial['index'], tag)
+        trial_rows = approaches(events, centres(surveys[calibration]), trial['index'], marker)
         rows.extend(dict(row, calibration=calibration) for row in trial_rows)
-        launch = launch_offset(events, trial['index'], tag)
+        launch = launch_offset(events, trial['index'], marker)
         launches.append(None if launch is None else dict(launch, calibration=calibration))
         included.append(trial['dir'])
     metrics = dict(version=1, kind='approach-accuracy-metrics', units='metres, Lighthouse frame',
                    trials_included=included, trials_excluded=excluded, positioning_source=source,
-                   drone_tag=tag,
+                   drone_marker=marker,
                    error_definitions=dict(
                        positioning=POSITIONING[source],
                        control='mean Lighthouse deck position minus commanded deck centre'),
@@ -360,19 +360,19 @@ def capture_survey(args, rig, out, image_name='survey.png'):
         camera.close()
 
 
-def drone_tag_check(args, rig):
-    """Camera only, never the radio: how reliably the overhead camera finds the drone tag (issue #40).
+def drone_marker_check(args, rig):
+    """Camera only, never the radio: how reliably the overhead camera finds the drone marker (issue #40).
 
-    Place or hold the drone under the camera with its tag ``--height-m`` above the floor tags.
-    Every frame refits the camera to the visible floor tags and lists the white-square candidates;
-    the drone is the one nearest ``--near-px`` (within ``--gate-px``). Without ``--near-px`` the
-    check only circles every candidate in drone-tag-check.png so you can pick the drone's.
+    Place or hold the drone under the camera. Every frame refits the camera to the visible floor
+    tags and lists the marker-coloured candidates; the drone is the one nearest ``--near-px``
+    (within ``--gate-px``). Without ``--near-px`` the check only circles every candidate in
+    drone-marker-check.png so you can pick the drone's. X-Y is reported at ``--height-m`` above
+    the floor tags; that height shifts it, not the detection rate or the spread.
     """
     from .camera import cv, open_camera, intrinsics_compatibility
-    from .vision import detect, drone_tag
+    from .vision import detect, drone_marker
     from .hover import WARMUP_FRAMES, refit_frame
-    if not (np.isfinite(args.drone_tag_size_m) and 0 < args.drone_tag_size_m <= .1):
-        raise ValueError('--drone-tag-size-m must be between 0 and 0.1 m')
+    marker = dict(hue=marker_hue(args.drone_marker_hue))
     if not (np.isfinite(args.height_m) and 0 <= args.height_m <= 1.):
         raise ValueError('--height-m must be between 0 and 1 m')
     if not 1 <= args.frames <= 3000:
@@ -380,7 +380,6 @@ def drone_tag_check(args, rig):
     out = Path(args.out)
     if out.exists():
         raise ValueError(f'{out} already exists; choose a new --out (checks are never overwritten)')
-    tag = dict(size_m=float(args.drone_tag_size_m))
     near = None if args.near_px is None else np.asarray(args.near_px, float)
     floor_z = float(np.mean([t['pose']['pos'][2] for t in rig['tags']]))
     calibration = artifacts.read(Path(args.calibration)/'report.json')
@@ -403,45 +402,45 @@ def drone_tag_check(args, rig):
             found = detect(frame.color)
             pose, registration = refit_frame(rig, found, intrinsics, pose, start)
             record = dict(time=frame.timestamp, visible_ids=sorted(found), frame_registration=registration,
-                          **drone_tag(frame.color, found, tag, intrinsics, pose.to_dict(), floor_z))
-            candidates = record['drone_tag_candidates']
+                          **drone_marker(frame.color, marker, intrinsics, pose.to_dict(), exclude=found.values()))
+            candidates = record['drone_marker_candidates']
             if near is not None and candidates:
                 distances = [np.linalg.norm(np.subtract(c['center_px'], near)) for c in candidates]
                 if min(distances) <= args.gate_px:
-                    record['drone_tag'] = candidates[int(np.argmin(distances))]
+                    record['drone_marker'] = candidates[int(np.argmin(distances))]
             records.append(record)
             if picture is None:  # first frame: every candidate circled, the drone's in green
                 picture = frame.color.copy()
                 for c in candidates:
                     centre = tuple(int(v) for v in np.rint(c['center_px']))
-                    colour = (0, 255, 0) if c is record.get('drone_tag') else (0, 0, 255)
+                    colour = (0, 255, 0) if c is record.get('drone_marker') else (0, 0, 255)
                     cv().circle(picture, centre, 12, colour, 2)
                     cv().putText(picture, f'{centre[0]},{centre[1]}', (centre[0]+14, centre[1]),
                                  cv().FONT_HERSHEY_SIMPLEX, .4, colour, 1)
-        cv().imwrite(str(out/'drone-tag-check.png'), picture)
+        cv().imwrite(str(out/'drone-marker-check.png'), picture)
     finally:
         camera.close()
-    measured = [r for r in records if 'drone_tag' in r]
+    measured = [r for r in records if 'drone_marker' in r]
     height = floor_z+args.height_m
-    xy = np.array([plane_xy(r['drone_tag_origin_m'], r['drone_tag']['direction'], height) for r in measured],
+    xy = np.array([plane_xy(r['drone_marker_origin_m'], r['drone_marker']['direction'], height) for r in measured],
                   float).reshape(-1, 2)
-    pixels = np.array([r['drone_tag']['center_px'] for r in measured], float).reshape(-1, 2)
+    pixels = np.array([r['drone_marker']['center_px'] for r in measured], float).reshape(-1, 2)
 
     def median(key):
-        return np.median([r['drone_tag'][key] for r in measured], axis=0).tolist() if measured else None
-    report = dict(version=1, kind='drone-tag-check', drone_tag=tag, radio_connected=False,
+        return np.median([r['drone_marker'][key] for r in measured], axis=0).tolist() if measured else None
+    report = dict(version=1, kind='drone-marker-check', drone_marker=marker, radio_connected=False,
                   calibration=str(args.calibration), intrinsics_check=compatibility,
-                  floor_z_m=floor_z, tag_height_above_floor_m=args.height_m,
+                  floor_z_m=floor_z, marker_height_above_floor_m=args.height_m,
                   near_px=args.near_px, gate_px=args.gate_px, frames=len(records),
-                  candidates_per_frame=float(np.median([len(r['drone_tag_candidates']) for r in records])),
+                  candidates_per_frame=float(np.median([len(r['drone_marker_candidates']) for r in records])),
                   detected=len(measured), detection_rate=len(measured)/len(records),
                   center_px=pixels.mean(axis=0).tolist() if measured else None,
                   center_std_px=pixels.std(axis=0).tolist() if measured else None,
                   xy_m=xy.mean(axis=0).tolist() if measured else None,
                   # RMS X-Y distance from the mean position: the frame-to-frame spread of a still drone.
                   xy_std_m=float(np.sqrt(np.sum(xy.var(axis=0)))) if measured else None,
-                  size_px=median('size_px'), contrast=median('contrast'), records=records)
-    artifacts.write(out/'drone-tag-check.json', report)
+                  size_px=median('size_px'), area_px=median('area_px'), hue=median('hue'), records=records)
+    artifacts.write(out/'drone-marker-check.json', report)
     return report
 
 
@@ -477,27 +476,29 @@ def recalibrate(args, rig, root, session):
     return survey
 
 
-def drone_tag_setting(args):
-    """The white tag square on the drone (--drone-tag-size-m, --drone-tag-height-m), or None."""
-    size, height = getattr(args, 'drone_tag_size_m', None), getattr(args, 'drone_tag_height_m', None)
-    if size is None and height is None:
+def marker_hue(hue):
+    hue = [float(v) for v in hue]
+    if not 0 <= hue[0] < hue[1] <= 179:
+        raise ValueError('--drone-marker-hue needs LOW < HIGH within OpenCV hue 0-179')
+    return hue
+
+
+def drone_marker_setting(args):
+    """The coloured marker on the drone (--drone-marker), or None when the detector is used."""
+    if not getattr(args, 'drone_marker', False):
         return None
-    if size is None or height is None:
-        raise ValueError('Give both --drone-tag-size-m (white square edge) and --drone-tag-height-m '
-                         '(tag surface above the Lighthouse deck position), in metres')
-    if not (np.isfinite(size) and 0 < size <= .1):
-        raise ValueError('--drone-tag-size-m must be between 0 and 0.1 m')
-    if not (np.isfinite(height) and -.1 <= height <= .1):
-        raise ValueError('--drone-tag-height-m must be between -0.1 and 0.1 m')
-    return dict(size_m=float(size), height_m=float(height))
+    hue = marker_hue(args.drone_marker_hue)
+    if not (np.isfinite(args.drone_marker_height_m) and -.1 <= args.drone_marker_height_m <= .1):
+        raise ValueError('--drone-marker-height-m must be between -0.1 and 0.1 m')
+    return dict(hue=hue, height_m=float(args.drone_marker_height_m))
 
 
 def session_settings(args):
     settings = dict(demo=bool(args.demo), controller=args.controller or ('pid' if args.demo else 'mellinger'),
                     dwell_s=float(args.dwell_s))
-    # Only sessions that use a drone tag record it, so earlier sessions still resume.
-    tag = drone_tag_setting(args)
-    return settings if tag is None else dict(settings, drone_tag=tag)
+    # Only sessions that use a drone marker record it, so earlier sessions still resume.
+    marker = drone_marker_setting(args)
+    return settings if marker is None else dict(settings, drone_marker=marker)
 
 
 def run_session(args, rig, ask=input):
@@ -510,7 +511,7 @@ def run_session(args, rig, ask=input):
     if args.trials is not None and not 1 <= args.trials <= 100:
         raise ValueError('--trials must be between 1 and 100')
     live = args.arm or args.check_only or args.camera_check_only
-    drone_tag_setting(args)
+    drone_marker_setting(args)
     if args.resume:
         root = Path(args.resume)
         session = artifacts.read(root/'session.json')

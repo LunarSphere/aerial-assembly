@@ -725,154 +725,155 @@ def test_approach_errors_from_settled_dwells():
     assert accuracy.approaches(synthetic_trial_events()[:6], SYNTHETIC_CENTRES, trial=1) == []
 
 
-DRONE_TAG = dict(size_m=.022, height_m=.03)  # white square edge; tag surface above the Lighthouse deck
+DRONE_MARKER = dict(hue=[75., 100.], height_m=.03)  # teal sticker 3 cm above the deck sensor plane
 
 
-def drone_tag_event(t, *points, height=.23):
-    # Lighthouse Z is 0.2 m in telemetry_event, so the tag surface is at 0.23 m.
+def drone_marker_event(t, *points, height=.23):
+    # Lighthouse Z is 0.2 m in telemetry_event, so the marker is at 0.23 m.
     origin = np.array([.5, .5, 1.5])
     candidates = []
     for xy in points:
         direction = np.array([*xy, height])-origin
         candidates.append(dict(center_px=[0., 0.], direction=(direction/np.linalg.norm(direction)).tolist()))
-    return dict(event='camera', t=t, time=t, drone_tag_origin_m=origin.tolist(), drone_tag_candidates=candidates)
+    return dict(event='camera', t=t, time=t, drone_marker_origin_m=origin.tolist(), drone_marker_candidates=candidates)
 
 
-def drone_tag_trial_events():
-    # Detection frames at 8 and 10 s are ignored once the drone carries a tag. Cage clutter at
-    # (0.4, -0.3) is a candidate in every frame; at 11 s only clutter is seen (gated out).
+def drone_marker_trial_events():
+    # Detection frames at 8 and 10 s are ignored once the drone carries a marker. Clutter of the
+    # same colour at (0.4, -0.3) is a candidate in every frame; at 11 s only clutter is seen (gated out).
     clutter = [.4, -.3]
-    return sorted(synthetic_trial_events()+[drone_tag_event(8.5, clutter, [.006, .008]),
-                                            drone_tag_event(9.5, [.006, .008], clutter),
-                                            drone_tag_event(11., clutter), drone_tag_event(14., [.5, .5])],
+    return sorted(synthetic_trial_events()+[drone_marker_event(8.5, clutter, [.006, .008]),
+                                            drone_marker_event(9.5, [.006, .008], clutter),
+                                            drone_marker_event(11., clutter), drone_marker_event(14., [.5, .5])],
                   key=lambda e: e['t'])
 
 
-def test_drone_tag_replaces_detection_for_positioning_error():
+def test_drone_marker_replaces_detection_for_positioning_error():
     from flight.calibration import accuracy
-    first, second = accuracy.approaches(drone_tag_trial_events(), SYNTHETIC_CENTRES, trial=1, drone_tag=DRONE_TAG)
+    first, second = accuracy.approaches(drone_marker_trial_events(), SYNTHETIC_CENTRES, trial=1,
+                                        drone_marker=DRONE_MARKER)
     np.testing.assert_allclose(first['camera_xy_m'], [.006, .008], atol=1e-12)
     np.testing.assert_allclose(first['positioning_error_xy_m'], [.006, .008], atol=1e-12)
     assert first['positioning_error_m'] == pytest.approx(math.sqrt(.006**2+.008**2))
     assert (first['camera_frames'], first['camera_gated_out'], first['deck_height_m']) == (2, 1, pytest.approx(.23))
-    assert first['positioning_source'] == 'drone_tag'
+    assert first['positioning_source'] == 'drone_marker'
     np.testing.assert_allclose(first['control_error_xy_m'], [.01, .01])
     assert second['positioning_error_xy_m'] is None and second['camera_frames'] == 0
-    pad = [telemetry_event(-1., [.01, 0.]), drone_tag_event(-.5, [.002, 0.]), *synthetic_trial_events()]
-    np.testing.assert_allclose(accuracy.launch_offset(pad, 1, DRONE_TAG)['offset_xy_m'], [.008, 0.], atol=1e-12)
+    pad = [telemetry_event(-1., [.01, 0.]), drone_marker_event(-.5, [.002, 0.]), *synthetic_trial_events()]
+    np.testing.assert_allclose(accuracy.launch_offset(pad, 1, DRONE_MARKER)['offset_xy_m'], [.008, 0.], atol=1e-12)
     # More than the gate from Lighthouse: not the drone, so no camera position at all.
-    far = [telemetry_event(-1., [1., 1.]), drone_tag_event(-.5, [.002, 0.]), *synthetic_trial_events()]
-    assert accuracy.launch_offset(far, 1, DRONE_TAG)['offset_xy_m'] is None
-    # The tag height comes from Lighthouse Z: a wrong height moves X-Y along the off-axis ray.
-    low = accuracy.approaches(drone_tag_trial_events(), SYNTHETIC_CENTRES, 1, dict(DRONE_TAG, height_m=0.))[0]
+    far = [telemetry_event(-1., [1., 1.]), drone_marker_event(-.5, [.002, 0.]), *synthetic_trial_events()]
+    assert accuracy.launch_offset(far, 1, DRONE_MARKER)['offset_xy_m'] is None
+    # The marker height comes from Lighthouse Z: a wrong height moves X-Y along the off-axis ray.
+    low = accuracy.approaches(drone_marker_trial_events(), SYNTHETIC_CENTRES, 1, dict(DRONE_MARKER, height_m=0.))[0]
     assert np.linalg.norm(np.subtract(low['camera_xy_m'], [.006, .008])) > .005
     # Earlier sessions keep the detection box centre.
-    detection = accuracy.approaches(drone_tag_trial_events(), SYNTHETIC_CENTRES, trial=1)[0]
+    detection = accuracy.approaches(drone_marker_trial_events(), SYNTHETIC_CENTRES, trial=1)[0]
     np.testing.assert_allclose(detection['positioning_error_xy_m'], [.03, -.04], atol=1e-12)
 
 
-def test_metrics_use_the_drone_tag_when_the_session_set_one(tmp_path):
+def test_metrics_use_the_drone_marker_when_the_session_set_one(tmp_path):
     import json
     from flight.calibration import accuracy
     root = synthetic_session(tmp_path/'session')
     session = artifacts.read(root/'session.json')
-    artifacts.write(root/'session.json', dict(session, settings=dict(drone_tag=DRONE_TAG)))
-    (root/'trial-01'/'events.jsonl').write_text(''.join(json.dumps(e)+'\n' for e in drone_tag_trial_events()))
+    artifacts.write(root/'session.json', dict(session, settings=dict(drone_marker=DRONE_MARKER)))
+    (root/'trial-01'/'events.jsonl').write_text(''.join(json.dumps(e)+'\n' for e in drone_marker_trial_events()))
     with patch.object(accuracy, 'plot'):
         metrics = accuracy.write_metrics(root)
-    assert metrics['positioning_source'] == 'drone_tag' and metrics['drone_tag'] == DRONE_TAG
-    assert 'white tag square' in metrics['error_definitions']['positioning']
+    assert metrics['positioning_source'] == 'drone_marker' and metrics['drone_marker'] == DRONE_MARKER
+    assert 'coloured marker' in metrics['error_definitions']['positioning']
     assert metrics['summary']['positioning']['overall']['mean_error_m'] == pytest.approx(.01)
 
 
-def render_white_squares(view, points, size_m=.022, floor=120, body=60, white=210, body_px=50):
-    """Grey image of white squares (on dark drone bodies unless body is None), 8x supersampled."""
+def hsv_bgr(h, s, v):
+    return camera.cv().cvtColor(np.uint8([[[h, s, v]]]), camera.cv().COLOR_HSV2BGR)[0, 0].astype(float)
+
+
+def render_markers(view, points, diameter_px=9., floor=(10, 60, 140), body=(0, 0, 50), body_px=40):
+    """BGR image of round markers [(world point, HSV colour)] on dark drone bodies, 8x supersampled."""
     transform, intrinsics, _ = view
     inverse = transform.inverse()
     rv = Rotation.from_quat(wxyz_to_xyzw(inverse.quat)).as_rotvec()
-    image = np.full((720, 1280), float(floor))
-    for point, dark in points:
+    image = np.tile(hsv_bgr(*floor), (720, 1280, 1))
+    for point, colour in points:
         cx, cy = camera.project_points([point], rv, np.array(inverse.pos), intrinsics)[0]
-        side = intrinsics['matrix'][0][0]*size_m/np.linalg.norm(np.subtract(point, transform.pos))
         x0, y0 = int(cx)-40, int(cy)-40
         fine = (np.arange(80*8)+.5)/8-.5  # pixel i covers [i-0.5, i+0.5]
         xx, yy = np.meshgrid(x0+fine, y0+fine)
-        patch = np.full(xx.shape, float(floor))
-        if dark:
-            patch[(abs(xx-cx) < body_px/2) & (abs(yy-cy) < body_px/2)] = body
-        patch[(abs(xx-cx) < side/2) & (abs(yy-cy) < side/2)] = white
-        image[y0:y0+80, x0:x0+80] = patch.reshape(80, 8, 80, 8).mean(axis=(1, 3))
+        patch = np.tile(hsv_bgr(*floor), (*xx.shape, 1))
+        patch[(abs(xx-cx) < body_px/2) & (abs(yy-cy) < body_px/2)] = hsv_bgr(*body)
+        patch[np.hypot(xx-cx, yy-cy) < diameter_px/2] = hsv_bgr(*colour)
+        image[y0:y0+80, x0:x0+80] = patch.reshape(80, 8, 80, 8, 3).mean(axis=(1, 3))
     return np.rint(image).astype(np.uint8)
 
 
-def test_drone_tag_white_square_ray_meets_its_height(view):
+TEAL, YELLOW_GREEN = (88, 150, 150), (32, 150, 150)
+
+
+def test_drone_marker_ray_meets_its_height(view, survey):
+    from flight.calibration import accuracy
     transform, intrinsics, observations = view
     point = [.3, .4, .17]
-    image = render_white_squares(view, [(point, True)])
-    from flight.calibration import accuracy
-    result = vision.drone_tag(image, observations, dict(size_m=.022), intrinsics, transform.to_dict(), floor_z=-.06)
-    [candidate] = result['drone_tag_candidates']
-    xy = accuracy.plane_xy(result['drone_tag_origin_m'], candidate['direction'], point[2])
-    assert np.linalg.norm(xy-point[:2]) < 1e-4  # sub-pixel centroid: under 0.1 mm here
-    assert candidate['contrast'] > 100
-    assert vision.drone_tag(np.full((720, 1280), 120, np.uint8), observations, dict(size_m=.022),
-                            intrinsics, transform.to_dict(), floor_z=-.06)['drone_tag_candidates'] == []
+    image = render_markers(view, [(point, TEAL), ([.6, .1, .17], YELLOW_GREEN)])  # props are another colour
+    result = vision.drone_marker(image, DRONE_MARKER, intrinsics, transform.to_dict())
+    [candidate] = result['drone_marker_candidates']
+    xy = accuracy.plane_xy(result['drone_marker_origin_m'], candidate['direction'], point[2])
+    assert np.linalg.norm(xy-point[:2]) < 3e-4  # sub-pixel centroid of a 9 px disc
+    assert 84 <= candidate['hue'] <= 92
+    two = render_markers(view, [(point, TEAL), ([.5, 0., .17], TEAL)])
+    assert len(vision.drone_marker(two, DRONE_MARKER, intrinsics, transform.to_dict())['drone_marker_candidates']) == 2
+    # Tag-edge colour fringes: faint ones fail the saturation cut, others sit inside a decoded floor tag.
+    fringes = render_markers(view, [(point, TEAL), ([.5, 0., .17], (88, 50, 150)),
+                                    (survey['tags'][3]['pose']['pos'], TEAL)])
+    result = vision.drone_marker(fringes, DRONE_MARKER, intrinsics, transform.to_dict(), exclude=observations.values())
+    assert len(result['drone_marker_candidates']) == 1
+    plain = np.tile(hsv_bgr(10, 60, 140), (720, 1280, 1)).astype(np.uint8)
+    assert vision.drone_marker(plain, DRONE_MARKER, intrinsics, transform.to_dict())['drone_marker_candidates'] == []
 
 
-def test_drone_tag_skips_floor_tag_cells_and_keeps_other_candidates(view, survey):
-    transform, intrinsics, observations = view
-    drone = ([.3, .4, .17], True)
-    floor_cell = (survey['tags'][3]['pose']['pos'], False)  # a white cell inside a decoded floor tag
-    image = render_white_squares(view, [drone, floor_cell])
-    args = (dict(size_m=.022), intrinsics, transform.to_dict(), -.06)
-    assert len(vision.drone_tag(image, observations, *args)['drone_tag_candidates']) == 1
-    two = render_white_squares(view, [drone, ([.5, 0., .17], True)])
-    assert len(vision.drone_tag(two, observations, *args)['drone_tag_candidates']) == 2
-
-
-def test_drone_tag_check_reports_detection_rate_with_camera_only(tmp_path, survey, view):
+def test_drone_marker_check_reports_detection_rate_with_camera_only(tmp_path, survey, view):
     from flight.calibration import accuracy
     transform, intrinsics, observations = view
     ca = artifacts.session(tmp_path/'ca', 'camera', survey)
     artifacts.report(ca, accepted=True, T_lighthouse_camera=transform.to_dict(), profile=intrinsics['profile'])
     artifacts.write(ca/'intrinsics.json', intrinsics)
     artifacts.write(tmp_path/'rig.json', survey)
-    seen = np.dstack([render_white_squares(view, [([.3, .4, -.03], True), ([.5, 0., -.03], True)])]*3)
+    seen = render_markers(view, [([.3, .4, -.03], TEAL), ([.5, 0., -.03], TEAL)])
     inverse = transform.inverse()
     near = camera.project_points([[.3, .4, -.03]], Rotation.from_quat(wxyz_to_xyzw(inverse.quat)).as_rotvec(),
                                  np.array(inverse.pos), intrinsics)[0]+[4, -3]
-    empty = np.full((720, 1280, 3), 120, np.uint8)
+    empty = np.tile(hsv_bgr(10, 60, 140), (720, 1280, 1)).astype(np.uint8)
     fake = MagicMock(profile=intrinsics['profile'], intrinsics=intrinsics)
     fake.frame.side_effect = [camera.Frame(seen if i % 2 else empty, float(i)) for i in range(15)] + \
         [camera.Frame(seen if i % 2 else empty, float(i)) for i in range(20)]  # every other frame missed
-    args = SimpleNamespace(calibration=str(ca), out=str(tmp_path/'check'), drone_tag_size_m=.022, height_m=.03,
-                           frames=20, demo=False, near_px=near.tolist(), gate_px=15.)
+    args = SimpleNamespace(calibration=str(ca), out=str(tmp_path/'check'), drone_marker_hue=(75., 100.),
+                           height_m=.03, frames=20, demo=False, near_px=near.tolist(), gate_px=15.)
     with patch('flight.calibration.vision.detect', return_value=observations), \
             patch('flight.hardware.connect', side_effect=AssertionError('radio opened')), \
             patch('flight.calibration.camera.open_camera', return_value=fake):
-        report = accuracy.drone_tag_check(args, survey)
+        report = accuracy.drone_marker_check(args, survey)
     fake.close.assert_called_once()
     assert (report['frames'], report['detected'], report['candidates_per_frame']) == (20, 10, 1.)
     assert report['detection_rate'] == pytest.approx(.5)
-    np.testing.assert_allclose(report['xy_m'], [.3, .4], atol=1e-4)
+    np.testing.assert_allclose(report['xy_m'], [.3, .4], atol=3e-4)
     assert report['xy_std_m'] < 1e-9 and report['radio_connected'] is False
-    assert artifacts.read(tmp_path/'check'/'drone-tag-check.json') == report
-    assert (tmp_path/'check'/'drone-tag-check.png').exists()
+    assert artifacts.read(tmp_path/'check'/'drone-marker-check.json') == report
+    assert (tmp_path/'check'/'drone-marker-check.png').exists()
     with pytest.raises(ValueError, match='new --out'):
-        accuracy.drone_tag_check(args, survey)
+        accuracy.drone_marker_check(args, survey)
 
 
-def test_drone_tag_settings_are_validated_and_recorded(tmp_path, survey, view):
+def test_drone_marker_settings_are_validated_and_recorded(tmp_path, survey, view):
     files = calibrated_files(tmp_path, survey, view)
     run = ['approach-accuracy', *files, '--demo', '--out']
-    assert cli.main([*run, str(tmp_path/'a'), '--drone-tag-size-m', '.022']) == 1  # height required
-    assert cli.main([*run, str(tmp_path/'b'), '--drone-tag-size-m', '0', '--drone-tag-height-m', '.03']) == 1
-    assert cli.main([*run, str(tmp_path/'c'), '--drone-tag-size-m', '.022', '--drone-tag-height-m', '.5']) == 1
-    assert not any((tmp_path/d).exists() for d in 'abc')
-    assert cli.main([*run, str(tmp_path/'d'), '--drone-tag-size-m', '.022', '--drone-tag-height-m', '.03']) == 0
-    assert artifacts.read(tmp_path/'d'/'session.json')['settings']['drone_tag'] == DRONE_TAG
-    assert cli.main([*run, str(tmp_path/'e')]) == 0
-    assert 'drone_tag' not in artifacts.read(tmp_path/'e'/'session.json')['settings']
+    assert cli.main([*run, str(tmp_path/'a'), '--drone-marker', '--drone-marker-hue', '100', '75']) == 1
+    assert cli.main([*run, str(tmp_path/'b'), '--drone-marker', '--drone-marker-height-m', '.5']) == 1
+    assert not any((tmp_path/d).exists() for d in 'ab')
+    assert cli.main([*run, str(tmp_path/'c'), '--drone-marker']) == 0
+    assert artifacts.read(tmp_path/'c'/'session.json')['settings']['drone_marker'] == dict(hue=[75., 100.], height_m=0.)
+    assert cli.main([*run, str(tmp_path/'d')]) == 0
+    assert 'drone_marker' not in artifacts.read(tmp_path/'d'/'session.json')['settings']
 
 
 def test_summary_statistics_match_hand_calculation():

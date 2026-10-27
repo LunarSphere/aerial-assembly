@@ -36,7 +36,7 @@ Mission (earlier, plan.json)
 - `clock.py` injectable time; `frames.py` poses and quaternion conversion; `sensing.py` overhead brick poses
 Calibration (`calibration/`)
 - `setup.py`, `discovery.py`, `lighthouse.py` Lighthouse geometry and radio discovery
-- `camera.py` D455 adapter; `vision.py` AprilTag geometry and drone-tag white-square candidates; `layout.py` tag survey; `registration.py` camera-to-Lighthouse pose; `drone.py` detectors
+- `camera.py` D455 adapter; `vision.py` AprilTag geometry and drone-marker colour candidates; `layout.py` tag survey; `registration.py` camera-to-Lighthouse pose; `drone.py` detectors
 - `hover.py` hover-check; `visits.py` tag-visit and over-centre routes; `rig.py`, `presets.py`, `artifacts.py` shared types, presets, JSON artifacts
-- `accuracy.py` Exp 3 approach accuracy: tag survey, trial sessions (`approach-accuracy`), offline metrics and plot (`approach-metrics`); positioning from the white square of the small tag on the drone (`--drone-tag-size-m`, #40; candidate nearest Lighthouse) or, for earlier sessions, the detection box; camera-only `drone-tag-check`
+- `accuracy.py` Exp 3 approach accuracy: tag survey, trial sessions (`approach-accuracy`), offline metrics and plot (`approach-metrics`); positioning from a coloured sticker on the drone's Lighthouse deck (`--drone-marker`, #40; candidate nearest Lighthouse) or, for earlier sessions, the detection box; camera-only `drone-marker-check`
 - `configs/` intrinsics, tag layout, drone reference; `tests/` pytest (about 2 s, mocks cflib)

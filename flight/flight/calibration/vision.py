@@ -61,62 +61,49 @@ def _candidate_poses(world, pixels, intrinsics):
     return candidates[0]
 
 
-def white_squares(gray, side_px, exclude=(), min_contrast=60.):
-    """Bright, square, compact blobs much brighter than the ring around them.
+def colour_blobs(image, hue, exclude=(), min_saturation=70, min_value=60, area_px=(20, 2000)):
+    """Round blobs within an OpenCV hue range (0-179), such as a coloured sticker on the drone.
 
-    Centres are background-subtracted, intensity-weighted centroids, so they are sub-pixel
-    even when the blob is only a few pixels across. Blobs inside ``exclude`` quads (decoded
-    floor tags, grown by half) are skipped: their white cells look the same.
+    Centres are saturation-weighted centroids, so they are sub-pixel even when the blob is
+    only a few pixels across. Black-white tag edges show faint colour fringes on the D455: the
+    minimum saturation and area reject most (the sticker is about 60 px at saturation ~100), and
+    blobs inside ``exclude`` quads (decoded floor tags, grown by a quarter) are skipped.
     """
     c = cv()
-    g = np.asarray(gray, float)
-    mask = (g-c.boxFilter(g, -1, (31, 31)) > 40).astype(np.uint8)
+    hsv = c.cvtColor(image, c.COLOR_BGR2HSV)
+    h, saturation, value = hsv[..., 0], hsv[..., 1].astype(float), hsv[..., 2]
+    mask = ((h >= hue[0]) & (h <= hue[1]) & (saturation >= min_saturation) & (value >= min_value)).astype(np.uint8)
+    mask = c.morphologyEx(mask, c.MORPH_CLOSE, np.ones((3, 3), np.uint8))  # rejoin a marker split by noise
     n, labels, stats, _ = c.connectedComponentsWithStats(mask, connectivity=8)
-    grown = [np.mean(q, axis=0)+1.5*(np.asarray(q, float)-np.mean(q, axis=0)) for q in exclude]
+    grown = [(np.mean(q, axis=0)+1.25*(np.asarray(q, float)-np.mean(q, axis=0))).astype(np.float32) for q in exclude]
     blobs = []
     for i in range(1, n):
-        x, y, w, h, area = stats[i]
-        side = (w+h)/2
-        if not side_px[0] <= side <= side_px[1] or max(w, h) > 1.5*min(w, h) or area < .5*w*h:
+        x, y, w, height, area = stats[i]
+        if not area_px[0] <= area <= area_px[1] or max(w, height) > 1.5*min(w, height) or area < .5*w*height:
             continue
-        pad = max(w, h)
-        x0, y0 = max(0, x-pad), max(0, y-pad)
-        x1, y1 = min(g.shape[1], x+w+pad), min(g.shape[0], y+h+pad)
-        ring = np.ones((y1-y0, x1-x0), bool)
-        ring[y-y0:y-y0+h, x-x0:x-x0+w] = False
-        surround = float(np.median(g[y0:y1, x0:x1][ring]))
-        contrast = float(np.median(g[y:y+h, x:x+w][labels[y:y+h, x:x+w] == i]))-surround
-        if contrast < min_contrast:
-            continue
-        bx0, by0 = max(0, x-1), max(0, y-1)
-        weights = np.clip(g[by0:y+h+1, bx0:x+w+1]-surround, 0, None)
-        yy, xx = np.mgrid[by0:by0+weights.shape[0], bx0:bx0+weights.shape[1]]
+        weights = (labels[y:y+height, x:x+w] == i)*saturation[y:y+height, x:x+w]
+        yy, xx = np.mgrid[y:y+height, x:x+w]
         centre = np.array([(xx*weights).sum(), (yy*weights).sum()])/weights.sum()
-        if any(c.pointPolygonTest(q.astype(np.float32), tuple(map(float, centre)), False) >= 0 for q in grown):
+        if any(c.pointPolygonTest(q, tuple(map(float, centre)), False) >= 0 for q in grown):
             continue
-        blobs.append(dict(center_px=centre.tolist(), size_px=[int(w), int(h)], contrast=contrast))
+        blobs.append(dict(center_px=centre.tolist(), size_px=[int(w), int(height)], area_px=int(area),
+                          hue=float(np.median(h[y:y+height, x:x+w][labels[y:y+height, x:x+w] == i]))))
     return blobs
 
 
-def drone_tag(image, found, tag, intrinsics, transform, floor_z, max_height_m=.8):
-    """Candidate rays through the white tag square on the drone (issue #40).
+def drone_marker(image, marker, intrinsics, transform, exclude=()):
+    """Candidate rays through the coloured marker on the drone (issue #40).
 
-    From the overhead camera the drone's tag is about 10 px across, too small to decode, so it
-    is found as a bright square blob. The expected size follows from its printed edge and the
-    range to anywhere between the floor and ``max_height_m`` above it. Cage and background clutter
-    can pass too, so every candidate is kept; offline, the one nearest Lighthouse is chosen.
+    The marker is a few pixels across from the overhead camera, found by colour. Pass the decoded
+    floor-tag quads as ``exclude``: only visible tags, since one the drone covers is not decoded.
+    Anything else of that colour passes too, so every candidate is kept; offline, the one nearest
+    Lighthouse is the drone.
     """
-    c = cv()
     pose = Pose.from_dict(transform)
-    focal = float(np.mean(np.diag(np.asarray(intrinsics['matrix'], float))[:2]))
-    far = pose.pos[2]-floor_z
-    near = max(.2, far-max_height_m)
-    side_px = (.6*focal*tag['size_m']/far, 1.5*focal*tag['size_m']/near)
-    gray = c.cvtColor(image, c.COLOR_BGR2GRAY) if image.ndim == 3 else image
-    blobs = white_squares(gray, side_px, exclude=found.values())
+    blobs = colour_blobs(image, marker['hue'], exclude)
     rays = pose.rotate(pixel_rays([b['center_px'] for b in blobs], intrinsics)) if blobs else []
-    return dict(drone_tag_origin_m=list(pose.pos),
-                drone_tag_candidates=[dict(b, direction=list(map(float, r))) for b, r in zip(blobs, rays)])
+    return dict(drone_marker_origin_m=list(pose.pos),
+                drone_marker_candidates=[dict(b, direction=list(map(float, r))) for b, r in zip(blobs, rays)])
 
 
 def solve(rig, observations, intrinsics):

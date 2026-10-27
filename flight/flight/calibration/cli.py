@@ -31,6 +31,12 @@ def flight_arguments(p):
     camera_arguments(p)
 
 
+def marker_hue_argument(p):
+    # The teal sticker measured hue 84–92 in the overhead D455 image on 2026-10-27.
+    p.add_argument('--drone-marker-hue', type=float, nargs=2, default=(75., 100.), metavar=('LOW', 'HIGH'),
+                   help='marker colour as an OpenCV hue range, 0–179 (default 75 100, teal)')
+
+
 def parser():
     root = argparse.ArgumentParser(description=__doc__)
     commands = root.add_subparsers(dest='command', required=True)
@@ -78,18 +84,20 @@ def parser():
     p.add_argument('--dwell-s', type=float, default=5., help='hold over each tag centre, 0–30 seconds (default 5)')
     p.add_argument('--resume', help='existing session directory to continue (instead of --out)')
     p.add_argument('--save-metrics', action='store_true', help='write metrics.json and approach-errors.png after every trial')
-    p.add_argument('--drone-tag-size-m', type=float, help='edge of the white square of the tag on the drone, metres; '
-                   'measures the drone by it instead of the detector')
-    p.add_argument('--drone-tag-height-m', type=float, help='height of the drone tag surface above the Lighthouse deck position, metres')
-    p = commands.add_parser('drone-tag-check', help='camera only, no radio: how reliably the camera finds the tag on the drone')
+    marker_hue_argument(p)
+    p.add_argument('--drone-marker', action='store_true',
+                   help='measure the drone by the coloured sticker on its Lighthouse deck instead of the detector')
+    p.add_argument('--drone-marker-height-m', type=float, default=0.,
+                   help='marker height above the deck sensor plane (the Lighthouse position), metres; default 0')
+    p = commands.add_parser('drone-marker-check', help='camera only, no radio: how reliably the camera finds the drone marker')
     p.add_argument('--setup', help='completed compact setup directory; fills rig, calibration and camera settings')
     p.add_argument('--rig')
     p.add_argument('--calibration', help='accepted camera session directory')
     p.add_argument('--out', required=True, help='new output directory')
-    p.add_argument('--drone-tag-size-m', type=float, required=True, help='edge of the white square of the drone tag, metres')
-    p.add_argument('--height-m', type=float, required=True, help='height of the drone tag surface above the floor tags, metres')
+    marker_hue_argument(p)
+    p.add_argument('--height-m', type=float, default=0., help='marker height above the floor tags, metres; shifts only the reported X-Y')
     p.add_argument('--near-px', type=float, nargs=2, metavar=('X', 'Y'),
-                   help="the drone tag's approximate pixel; without it, drone-tag-check.png circles every candidate")
+                   help="the marker's approximate pixel; without it, drone-marker-check.png circles every candidate")
     p.add_argument('--gate-px', type=float, default=15., help='candidates farther than this from --near-px are not the drone (default 15)')
     p.add_argument('--frames', type=int, default=150, help='frames to measure, 1–3000 (default 150, about 5 s at 30 fps)')
     p.add_argument('--demo', action='store_true', help='use live intrinsics if the lens mapping drifted')
@@ -165,18 +173,18 @@ def main(argv=None):
                                      f'n={overall["n"]}' if overall['n'] else 'no measurements')
                       + f', missing {summary["missing"]}')
             print(f'Metrics: {Path(args.session)/"metrics.json"}')
-        elif args.command == 'drone-tag-check':
+        elif args.command == 'drone-marker-check':
             if args.setup:
                 apply_setup(args)
             if not (args.rig and args.calibration):
                 raise ValueError('Use --setup DIRECTORY, or provide --rig and --calibration')
-            from .accuracy import drone_tag_check
-            report = drone_tag_check(args, rig.load(args.rig))
-            print(f'Drone tag: found in {report["detected"]}/{report["frames"]} frames '
-                  f'(median {report["candidates_per_frame"]:g} white-square candidates per frame)'
+            from .accuracy import drone_marker_check
+            report = drone_marker_check(args, rig.load(args.rig))
+            print(f'Drone marker: found in {report["detected"]}/{report["frames"]} frames '
+                  f'(median {report["candidates_per_frame"]:g} candidates per frame)'
                   + (f', centre {report["center_px"][0]:.2f}, {report["center_px"][1]:.2f} px, '
-                     f'X-Y spread {report["xy_std_m"]*1000:.2f} mm, square {report["size_px"]} px' if report['detected'] else '')
-                  + f'. Report: {Path(args.out)/"drone-tag-check.json"}')
+                     f'X-Y spread {report["xy_std_m"]*1000:.2f} mm, blob {report["size_px"]} px' if report['detected'] else '')
+                  + f'. Report: {Path(args.out)/"drone-marker-check.json"}')
         elif args.command == 'devices':
             print(json.dumps(devices(args), indent=2))
         elif args.command == 'replay-lighthouse':
