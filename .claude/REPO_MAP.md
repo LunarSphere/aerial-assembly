@@ -14,6 +14,7 @@ Keep this file current: when you add, remove, rename, or change the role of a mo
 ## brixzle/src/brixzle (CLI: `brixzle`, entry `cli.py`)
 Geometry and design
 - `params.py` brick parameters, V0 (the A/B pair, the only design), optimizer bounds
+- `approach_error.py` Exp 3 measured approach error (metrics.json or `configs/error-exp3-*.json`) -> ErrorModel and required tolerance
 - `profile.py` 2D XZ profile of parts A and B, shared tine bores, base (shapely); `convex.py` convex decomposition
 - `cad.py` CadQuery solid, exports, mass, collision pieces; `baseplate.py` anchored base
 - `gripper.py` passive grippers; `rules.py` analytic design rules
