@@ -684,6 +684,26 @@ def test_deck_xy_uses_ray_at_median_depth_height():
     assert result['frames'] == 5
 
 
+def test_recentre_casts_mask_centroid_through_the_logged_frame_pose():
+    from flight.calibration import accuracy
+    intrinsics = dict(matrix=[[500., 0, 640.], [0, 500., 360.], [0, 0, 1]], distortion=[0.]*5,
+                      distortion_model='distortion.inverse_brown_conrady')
+    down = dict(pos=[0., 0., 1.5], quat=[0., 1., 0., 0.])  # camera +x = world +x, +y = world -y
+    imaged = dict(event='camera', t=1., time=1., image='hover-0000.png', drone_world_m=[0., 0., .25],
+                  drone=dict(center_px=[640., 360.]), registration=dict(T_lighthouse_camera=down),
+                  drone_ray_world_m=dict(origin=[0., 0., 1.5], direction=[0., 0., -1.]))
+    unsaved = dict(imaged, t=2., time=2., image=None)
+    events = [dict(event='target', t=0.), imaged, unsaved]
+    centroids = {'hover-0000.png': [650., 340.]}
+    shifted = accuracy.recentre(events, centroids, intrinsics)
+    assert [e['event'] for e in shifted] == ['target', 'camera']
+    # 10 px right, 20 px up at 500 px focal length, 1.25 m above the deck plane.
+    np.testing.assert_allclose(accuracy.deck_xy(shifted[1:])['xy_m'], [.025, .05], atol=1e-12)
+    same_frames = accuracy.recentre(events, centroids, intrinsics, shift=False)
+    assert same_frames[1] == imaged
+    assert events[1]['drone_ray_world_m']['direction'] == [0., 0., -1.]
+
+
 def telemetry_event(t, xy):
     return dict(event='telemetry', t=t, host_time=t,
                 values={'stateEstimate.x': xy[0], 'stateEstimate.y': xy[1], 'stateEstimate.z': .2})
@@ -788,7 +808,8 @@ def test_exp3_figure_import_keeps_survey_image_and_plots_approach_errors(tmp_pat
     figures.import_session(root)
     assert (tmp_path/'data'/'survey.png').read_bytes() == b'png'
     assert not (tmp_path/'data'/'approach-errors.png').exists()  # derived; rebuilt from data/
-    _, approaches, _ = figures.load()
+    _, approaches, _, methods = figures.load()
+    assert methods == []  # no masks-sam.json: no box-vs-SAM comparison
     figures.plot_approach_errors(approaches, tmp_path/'approach-errors.png')
     assert (tmp_path/'approach-errors.png').stat().st_size > 0
 

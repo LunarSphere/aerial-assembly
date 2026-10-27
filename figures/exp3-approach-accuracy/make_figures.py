@@ -5,6 +5,9 @@
     # any time: rebuild the tables and figures from data/
     uv run --project flight --extra plot python figures/exp3-approach-accuracy/make_figures.py
 
+With data/trial-NN/masks-sam.json from segment_frames.py (#26), it also compares the YOLOE box centre with
+the SAM mask centroid on the same saved frames (methods.csv, methods-summary.csv, positioning-methods.png).
+
 Errors are computed with the same functions as `flight-cal approach-metrics`
 (flight/flight/calibration/accuracy.py), from the raw event logs.
 """
@@ -23,6 +26,7 @@ HERE = Path(__file__).resolve().parent
 DATA = HERE/'data'
 CALIBRATION_COLOURS = {1: '#2a78d6', 2: '#eb6834'}
 CALIBRATION_MARKERS = {1: 'o', 2: '^'}
+BOX_COLOUR, SAM_COLOUR = '#52514e', '#7a3fc4'
 INK, MUTED, GRID, SURFACE = '#0b0b0b', '#52514e', '#e8e7e3', '#fcfcfb'
 
 
@@ -47,7 +51,7 @@ def import_session(source):
 def load():
     session = json.loads((DATA/'session.json').read_text())
     surveys = {c['index']: json.loads((DATA/c['survey']).read_text()) for c in accuracy.calibrations(session)}
-    approaches, trials = [], []
+    approaches, trials, methods = [], [], []
     for trial in session['trials']:
         folder = DATA/trial['dir']
         report = json.loads((folder/'report.json').read_text())
@@ -60,9 +64,50 @@ def load():
                            station_residual_mrad=check.get('worst_rms_mrad'),
                            launch_offset_mm=None if not launch or launch['offset_m'] is None else launch['offset_m']*1000))
         if trial['accepted']:
-            for row in accuracy.approaches(events, accuracy.centres(surveys[calibration]), trial['index']):
+            centres = accuracy.centres(surveys[calibration])
+            for row in accuracy.approaches(events, centres, trial['index']):
                 approaches.append(dict(row, calibration=calibration))
-    return session, approaches, trials
+            masks = folder/'masks-sam.json'
+            if masks.exists():
+                centroids = {name: m['centroid_px'] for name, m in json.loads(masks.read_text())['frames'].items()}
+                intrinsics = surveys[calibration]['intrinsics']
+                for method, shift in (('box', False), ('sam', True)):
+                    for row in accuracy.approaches(accuracy.recentre(events, centroids, intrinsics, shift),
+                                                   centres, trial['index']):
+                        methods.append(dict(row, calibration=calibration, method=method))
+    return session, approaches, trials, methods
+
+
+def method_rows(approaches, methods):
+    """One row per approach: positioning error from the box centre (all frames, and the saved frames only)
+    and from the SAM mask centroid on those same saved frames."""
+    key = lambda r: (r['trial'], r['tag_id'])
+    by = {m: {key(r): r for r in methods if r['method'] == m} for m in ('box', 'sam')}
+    rows = []
+    for r in approaches:
+        box, sam = by['box'].get(key(r)), by['sam'].get(key(r))
+        if not box or box['positioning_error_m'] is None:
+            continue
+        shift = np.subtract(sam['camera_xy_m'], box['camera_xy_m'])*100
+        rows.append(dict(trial=r['trial'], calibration=r['calibration'], tag=r['tag_id'],
+                         all_frames=r['camera_frames'], saved_frames=box['camera_frames'],
+                         box_all_frames_cm=r['positioning_error_m']*100, box_cm=box['positioning_error_m']*100,
+                         sam_cm=sam['positioning_error_m']*100, sam_minus_box_dx_cm=shift[0],
+                         sam_minus_box_dy_cm=shift[1], sam_minus_box_cm=float(np.linalg.norm(shift))))
+    return rows
+
+
+def method_summary(rows):
+    groups = [('pooled', rows)]+[(f'calibration {c}', [r for r in rows if r['calibration'] == c])
+                                 for c in sorted({r['calibration'] for r in rows})]
+    out = []
+    for label, subset in groups:
+        for column in ('box_all_frames_cm', 'box_cm', 'sam_cm', 'sam_minus_box_cm'):
+            values = np.array([r[column] for r in subset])
+            out.append(dict(group=label, measure=column[:-3], n=len(values), mean_cm=float(values.mean()),
+                            rmse_cm=float(np.sqrt(np.mean(values**2))), max_cm=float(values.max()),
+                            sam_better=sum(r['sam_cm'] < r['box_cm'] for r in subset)))
+    return out
 
 
 def write_csv(path, rows, columns):
@@ -193,6 +238,34 @@ def plot_by_trial(approaches, trials, path):
     plt.close(figure)
 
 
+def plot_methods(rows, path):
+    """Positioning error per approach on the same saved frames: YOLOE box centre vs SAM mask centroid."""
+    import matplotlib.pyplot as plt
+    figure, axis = plt.subplots(figsize=(6.4, 3.4), constrained_layout=True)
+    style(axis)
+    x = np.arange(len(rows))
+    for i, r in enumerate(rows):
+        axis.plot([i, i], sorted([r['box_cm'], r['sam_cm']]), color=GRID, linewidth=2, zorder=1)
+    axis.scatter(x, [r['box_cm'] for r in rows], s=40, facecolor=SURFACE, edgecolor=BOX_COLOUR,
+                 linewidth=1.6, zorder=3, label='YOLOE box centre')
+    axis.scatter(x, [r['sam_cm'] for r in rows], s=30, color=SAM_COLOUR, edgecolor=SURFACE, linewidth=1.2,
+                 zorder=4, label='SAM 2.1 mask centroid')
+    trials = [r['trial'] for r in rows]
+    starts = [i for i in range(len(rows)) if i == 0 or trials[i] != trials[i-1]]
+    for i in starts[1:]:
+        axis.axvline(i-.5, color=MUTED, linewidth=.6)
+    axis.set_xticks([(a+b-1)/2 for a, b in zip(starts, starts[1:]+[len(rows)])],
+                    [f'trial {trials[i]}' for i in starts], fontsize=8)
+    axis.set_xlim(-.6, len(rows)-.4)
+    axis.set_ylim(0, 1.25*max(max(r['box_cm'], r['sam_cm']) for r in rows))
+    axis.set_ylabel('Positioning error (cm)', fontsize=9, color=INK)
+    axis.legend(frameon=False, fontsize=8, ncol=2, loc='upper left')
+    figure.suptitle('Exp 3 positioning error: box centre vs SAM mask centroid, same saved frames',
+                    fontsize=10, color=INK)
+    figure.savefig(path, dpi=200, facecolor=SURFACE)
+    plt.close(figure)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('--import', dest='source', help='copy a session directory from runs/ into data/ first')
@@ -203,7 +276,7 @@ def main():
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
     plt.rcParams.update({'font.size': 9, 'axes.edgecolor': MUTED, 'xtick.color': MUTED, 'ytick.color': MUTED})
-    session, approaches, trials = load()
+    session, approaches, trials, methods = load()
     flat = flat_approaches(approaches)
     write_csv(HERE/'approaches.csv', flat, list(flat[0]))
     write_csv(HERE/'trials.csv', trials, list(trials[0]))
@@ -216,6 +289,15 @@ def main():
         if row['tag'] == 'all':
             print(f'{row["group"]:14s} {row["error"]:11s} n={row["n"]:2d} mean {row["mean_cm"]:.2f} cm, '
                   f'RMSE {row["rmse_cm"]:.2f} cm, max {row["max_cm"]:.2f} cm')
+    if methods:
+        rows = method_rows(approaches, methods)
+        write_csv(HERE/'methods.csv', rows, list(rows[0]))
+        compared = method_summary(rows)
+        write_csv(HERE/'methods-summary.csv', compared, list(compared[0]))
+        plot_methods(rows, HERE/'positioning-methods.png')
+        for row in compared:
+            print(f'{row["group"]:14s} {row["measure"]:15s} n={row["n"]:2d} mean {row["mean_cm"]:.2f} cm, '
+                  f'RMSE {row["rmse_cm"]:.2f} cm, max {row["max_cm"]:.2f} cm, SAM better {row["sam_better"]}')
 
 
 if __name__ == '__main__':

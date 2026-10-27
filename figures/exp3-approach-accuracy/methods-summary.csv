@@ -1,0 +1,9 @@
+group,measure,n,mean_cm,rmse_cm,max_cm,sam_better
+pooled,box_all_frames,25,1.5780,1.6915,2.7264,24
+pooled,box,25,1.6001,1.7360,3.1862,24
+pooled,sam,25,1.1233,1.3070,2.6616,24
+pooled,sam_minus_box,25,0.7431,0.8245,1.3352,24
+calibration 1,box_all_frames,25,1.5780,1.6915,2.7264,24
+calibration 1,box,25,1.6001,1.7360,3.1862,24
+calibration 1,sam,25,1.1233,1.3070,2.6616,24
+calibration 1,sam_minus_box,25,0.7431,0.8245,1.3352,24
