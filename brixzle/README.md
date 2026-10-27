@@ -38,10 +38,39 @@ live on in git history (`5c15572`).
 
 ### Placement-error model (coarse drone)
 
-The drone aims at a point offset by a 3 mm bias toward the side the tooth
-stroke comes from. Errors are x/y ~ N(0, 4 mm) clipped at ±12 mm, yaw σ 5°,
-roll/pitch σ 3°, release 5–30 mm above the highest-reach height, and residual
-velocity σ 0.03 m/s.
+The default ("legacy guess", hand-set) aims at a point offset by a 3 mm bias toward the side the
+tooth stroke comes from. Errors are x/y ~ N(0, 4 mm) clipped at ±12 mm, yaw σ 5°, roll/pitch σ 3°,
+release 5–30 mm above the highest-reach height, and residual velocity σ 0.03 m/s.
+
+**Measured X-Y error (Exp 3, #25).** `--approach-error configs/error-exp3-r4.json --error-stat mean|max|empirical`
+replaces the X-Y part with the positioning error measured in `runs/exp3-r4` (2026-10-27, drone
+marker, 24 approaches over 5 trials; `runs/` is git-ignored, so the values are copied into the
+config by `approach_error.load`): mean 14.8 mm, RMSE 16.8 mm, p95 27.8 mm, max 38.5 mm. It is used
+zero-mean: `mean` and `max` put every placement at that fixed radius in a random direction,
+`empirical` resamples the 24 radii. The measured mean vector (−8.5, +3.9) mm is recorded but not
+applied, since a sticker offset from the deck centre would show up as exactly such a bias. Yaw,
+tilt, release height and velocity were not measured and keep the defaults above (labelled
+`unmeasured` in every output's `config.error.source`). The optimizer takes
+`eval.approach_error = {"config": ..., "statistic": ...}`; the required tolerance then sets the
+`capture_x/y` rule targets and adds a simulated capture constraint (`capture_tolerance`), and
+`fixture.fixture_rules(..., tolerance=)` adds the pickup funnel rule.
+
+A/B V0 under each model (simulated, uncalibrated contact; `configs/ab.json`, drops n = 96 seed 0,
+structures seeds 1–4; run directories `runs/ab-legacy-guess-*`, `runs/ab-exp3r4-mean-*`,
+`runs/ab-exp3r4-max-*`):
+
+| Trial | Legacy guess | Exp 3 mean (14.8 mm) | Exp 3 max (38.5 mm) |
+|---|---|---|---|
+| Drop A onto base, μ 0.2 / 0.35 / 0.5 | 92 / 79 / 82% | 19 / 15 / 11% | 0 / 0 / 0% |
+| Drop B onto A, μ 0.2 / 0.35 / 0.5 | 91 / 82 / 77% | 20 / 17 / 12% | 0 / 0 / 0% |
+| Wall 3×4, stable bricks per seed | 0, 4, 0, 3 of 10 | 0, 0, 1, 1 | 0 |
+| Bridge, stable per seed | 0, 3, 0, 2 of 7 | 0, 0, 1, 1 | 0 |
+| Tower 6, stable per seed | 0, 3, 0, 1 of 6 | 0, 0, 1, 1 | 0 |
+| Ring 6×6×4, seated per seed (`--keep-going`) | 10, 9, 6, 13 of 32 | 1, 0, 1, 1 | 0 |
+
+With the measured mean error, A/B misses its ±10 mm capture on most drops (jams, or falls off the
+gutter in Y); with the max, nearly every drop falls. A/B fails the measured `capture_x/y` rules
+(`capture_x` = 10 − 14.8 mm). That motivates the distributed-funnel brick (#42).
 
 ### V0 results (simulated, uncalibrated contact; not hardware rates)
 
@@ -51,7 +80,7 @@ Measured on this branch with `configs/ab.json`, seed 0 (run directories in `runs
 |---|---|
 | X capture sweep (`drop`), A onto the base / B onto a seated A | Seats from −7.5 to +16.5 mm / −8.5 to +15.5 mm |
 | Drop Monte Carlo, n = 96, μ = 0.2 / 0.35 / 0.5: A onto the base (`ab-only-drop-A-*`) | 92 / 79 / 82% seated; all failures jam |
-| Same, B onto a seated A (`ab-only-drop-B-*`) | 92 / 84 / 71% seated |
+| Same, B onto a seated A (`ab-only-drop-B-*`) | 92 / 84 / 71% seated (re-run 2026-10-27 on master and this branch, `runs/ab-legacy-guess-drop-B-*`: 91 / 82 / 77%) |
 | Ideal assembly: running-bond wall 3×4, corbelled bridge with key (`ab-only-wall-ideal`, `ab-only-bridge-ideal`) | 10/10 and 7/7 stable. Max sag 0.48 mm |
 | Single-brick staircase overhang, ideal aim, 12 requested (`ab-only-overhang±-ideal`) | 5 stable in both +x and −x; the 6th jams on a supporter that has sagged 5 mm |
 | Ideal 6×6 ring, 4 courses (`ring-ab-ideal`) | 32/32 seated |
