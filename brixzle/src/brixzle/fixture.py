@@ -152,9 +152,22 @@ def stand_home(fp: FixtureParams, guard_bottom=-15.3):
     return np.array([fp.stand_xy[0], fp.stand_xy[1], fp.stand_z - guard_bottom])
 
 
-def fixture_rules(p: BrickParams, fp: FixtureParams, fixture, gripper):
-    """Signed margins (>= 0 satisfied): slot spacing, open Y faces, approach corridor, stand."""
+def funnel_capture_margin(fp: FixtureParams, tolerance):
+    """Pickup capture: the tine guide's mouth half-width minus the required X-Z approach error (mm).
+
+    Without a funnel the tines must hit the bore directly, so any error fails.
+    """
+    return (fp.funnel_mouth if fp.funnel else 0.) - tolerance
+
+
+def fixture_rules(p: BrickParams, fp: FixtureParams, fixture, gripper, tolerance=0.):
+    """Signed margins (>= 0 satisfied): slot spacing, open Y faces, approach corridor, stand.
+
+    ``tolerance`` > 0 (mm, a measured approach error) adds the pickup capture rule.
+    """
     out = {}
+    if tolerance > 0:
+        out['funnel_covers_error'] = funnel_capture_margin(fp, tolerance)
     out['slot_pitch'] = fp.pitch - (fp.guard_span + fp.margin)
     # The base strip spans |y| <= D/2; the tines enter from beyond D/2 + protrude.
     ys = np.vstack(fixture['local'])[:, 1]

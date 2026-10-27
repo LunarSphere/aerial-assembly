@@ -4,7 +4,7 @@ Each rule returns a signed margin; >= 0 means satisfied. NSGA-III uses the
 negated margins as inequality constraints (g <= 0), and the CLI prints them as
 the design's justification.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 
 import numpy as np
@@ -26,6 +26,13 @@ class RuleSettings:
     residual_tilt_deg: float = 6.  # tilt left when the tooth meets the slot (3 sigma of release tilt)
     hang_margin: float = 1.0     # tine contact must sit this far above the COM (mm)
     max_play_deg: float = 6.     # seated rotational play allowed in a single-tooth joint
+
+
+def settings_for_tolerance(tolerance, base: RuleSettings = RuleSettings()):
+    """Rule settings whose X and Y capture targets are a measured approach error (mm, see approach_error)."""
+    if not (math.isfinite(tolerance) and tolerance >= 0):
+        raise ValueError('tolerance must be finite and >= 0')
+    return replace(base, placement_error=float(tolerance), placement_error_y=float(tolerance))
 
 
 def rules(p: BrickParams, bundle, s: RuleSettings = RuleSettings()):

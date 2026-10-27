@@ -19,6 +19,9 @@ from .params import BrickParams
 from .scene import MM, activate, body_pose, build_scene, park
 
 
+RADIAL_MODES = ('gauss', 'ring', 'bootstrap')
+
+
 @dataclass(frozen=True)
 class ErrorModel:
     """Coarse drone placement: aim at the cavity, rely on geometry."""
@@ -34,13 +37,36 @@ class ErrorModel:
     # instead of the ideal lattice pose; matters once a cantilever sags.
     track_supporter: bool = False
     exact_courses: int = 0       # courses below this are placed without error (anchored start)
+    # X-Y error shape: 'gauss' (sigma_xy, clip_xy; the hand-set default), or measured Exp 3
+    # magnitudes in a uniformly random direction: 'ring' (fixed radius_mm) or 'bootstrap'
+    # (resampled radii_mm). See approach_error.py.
+    radial_mode: str = 'gauss'
+    radius_mm: float = 0.
+    radii_mm: tuple = ()
+    source: dict = field(default_factory=dict)  # provenance, written with every result
+
+    def __post_init__(self):
+        if self.radial_mode not in RADIAL_MODES:
+            raise ValueError(f'radial_mode must be one of {RADIAL_MODES}')
+        if self.radial_mode == 'ring' and not (math.isfinite(self.radius_mm) and self.radius_mm >= 0):
+            raise ValueError('ring mode needs a finite radius_mm >= 0')
+        if self.radial_mode == 'bootstrap' and (not self.radii_mm or
+                                                not all(math.isfinite(r) and r >= 0 for r in self.radii_mm)):
+            raise ValueError('bootstrap mode needs finite radii_mm >= 0')
+
+    def _xy(self, rng):
+        if self.radial_mode == 'gauss':
+            return np.clip(rng.normal(0, self.sigma_xy, 2), -self.clip_xy, self.clip_xy)
+        r = self.radius_mm if self.radial_mode == 'ring' else float(rng.choice(self.radii_mm))
+        a = rng.uniform(0, 2*math.pi)
+        return r*math.cos(a), r*math.sin(a)
 
     def sample(self, rng):
         if self.ideal:
             return dict(dx=self.aim_bias, dy=0., yaw=0., roll=0., pitch=0., clear=self.clearance[0],
-                        vel=[0., 0., 0.])
-        dx, dy = np.clip(rng.normal(0, self.sigma_xy, 2), -self.clip_xy, self.clip_xy)
-        return dict(dx=float(dx + self.aim_bias), dy=float(dy),
+                        vel=[0., 0., 0.], aim=self.aim_bias)
+        dx, dy = self._xy(rng)
+        return dict(dx=float(dx + self.aim_bias), dy=float(dy), aim=self.aim_bias,
                     yaw=float(rng.normal(0, self.sigma_yaw)),
                     roll=float(rng.normal(0, self.sigma_tilt)), pitch=float(rng.normal(0, self.sigma_tilt)),
                     clear=float(rng.uniform(*self.clearance)),
@@ -267,6 +293,19 @@ def capture_radius(rows, level=0.9, bins=None):
         else:
             break
     return radius
+
+
+def capture_margin(p: BrickParams, brick, tolerance, level=0.9, step=1.0, part='A', cfg=None):
+    """X capture radius at ``level`` minus the required tolerance (mm); >= 0 satisfied.
+
+    A deterministic sweep of offsets up to ``tolerance + step`` on both sides of the aim
+    (ideal pose otherwise), so a design must seat across the measured approach error.
+    """
+    cfg = cfg or TrialConfig(error=ErrorModel(ideal=True))
+    d = np.arange(0., tolerance + step + 1e-9, step)
+    offsets = cfg.error.aim_bias + np.concatenate([-d[:0:-1], d])
+    rows, _ = drop_trials(p, brick, cfg, offsets=offsets.tolist(), part=part)
+    return capture_radius(rows, level) - tolerance
 
 
 def assemble(p: BrickParams, brick, structure, cfg: TrialConfig, seed=0, stop_on_fail=True,

@@ -47,6 +47,10 @@ class EvalConfig:
     score_weights: dict = field(default_factory=lambda: {'drop': 1., 'overhang': 1., 'wall': 1., 'bridge': 1.})
     span_weight: float = 1.0
     error: dict = field(default_factory=dict)  # overrides for trials.ErrorModel
+    # Measured approach error (#25): {'config': metrics.json or configs/error-*.json,
+    # 'statistic': 'mean' | 'max' | 'empirical', 'capture_level': 0.9}. Replaces the X-Y part of
+    # ``error`` and makes the required tolerance a constraint (capture rules + simulated capture).
+    approach_error: dict = field(default_factory=dict)
     # Search setup: base params (seed centre and unsearched fields) and bound overrides.
     base: dict = field(default_factory=dict)
     bounds: dict = field(default_factory=dict)
@@ -106,12 +110,22 @@ def evaluate(p: BrickParams, ec: EvalConfig):
         brick = bricks['A']
     except Exception as exc:  # geometry failed to build: infeasible
         return worst, {'geometry_builds': -1.}, {'error': repr(exc)}
-    margins = {k: v for k, v in R.rules(p, brick).items() if k not in SKIP_RULES}
+    err, tolerance = measured_error(ec)
+    settings = R.settings_for_tolerance(tolerance) if tolerance is not None else R.RuleSettings()
+    margins = {k: v for k, v in R.rules(p, brick, settings).items() if k not in SKIP_RULES}
     margins['geometry_builds'] = 1.
     margins['course_insertable'] = course_insertable(p)
+    margins['capture_tolerance'] = 1.
+    source = {'approach_error': err.source} if err.source else {}
     if not R.feasible(margins):
-        return dict(worst, mass_g=brick['mass_g']), margins, {'skipped': 'rules', 'seconds': time.time() - t0}
-    err = T.ErrorModel(**ec.error)
+        return dict(worst, mass_g=brick['mass_g']), margins, {'skipped': 'rules', 'seconds': time.time() - t0,
+                                                              **source}
+    if tolerance is not None:
+        margins['capture_tolerance'] = T.capture_margin(p, bricks, tolerance,
+                                                        level=ec.approach_error.get('capture_level', 0.9))
+        if margins['capture_tolerance'] < 0:
+            return dict(worst, mass_g=brick['mass_g']), margins, {'skipped': 'capture',
+                                                                  'seconds': time.time() - t0, **source}
     drops, details = [], {}
     try:
         for mu in ec.frictions:
@@ -146,10 +160,22 @@ def evaluate(p: BrickParams, ec: EvalConfig):
                't_assembly_s': float(np.mean(times)), 'mass_g': brick['mass_g'],
                'collisions': ds['collisions']}
         details = {'scores': scores, 'drop_outcomes': ds['outcomes'], 'overhang_stable': ovh['stable_bricks'],
-                   'overhang_sag_mm': ovh['max_sag_mm'], 'seconds': time.time() - t0}
+                   'overhang_sag_mm': ovh['max_sag_mm'], 'seconds': time.time() - t0, **source}
         return obj, margins, details
     except Exception:
         return dict(worst, mass_g=brick['mass_g']), margins, {'error': traceback.format_exc(limit=3)}
+
+
+def measured_error(ec: EvalConfig):
+    """(ErrorModel, required tolerance in mm or None) from ``ec.error`` and ``ec.approach_error``."""
+    err = T.ErrorModel(**ec.error)
+    if not ec.approach_error:
+        return err, None
+    from . import approach_error as AE
+    path = ec.approach_error['config']
+    summary = AE.load(path)
+    stat = ec.approach_error.get('statistic', 'mean')
+    return AE.error_model(summary, stat, base=err, config=path), AE.required_tolerance(summary, stat)
 
 
 def course_insertable(p: BrickParams):
@@ -232,7 +258,7 @@ class Checkpoint(Callback):
 
 def constraint_names():
     margins = R.rules(V0, cad.build_brick(V0, solid=False))
-    return [k for k in margins if k not in SKIP_RULES] + ['geometry_builds', 'course_insertable']
+    return [k for k in margins if k not in SKIP_RULES] + ['geometry_builds', 'course_insertable', 'capture_tolerance']
 
 
 def select(F, weights):
