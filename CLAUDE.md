@@ -4,11 +4,12 @@ Guidance for Claude Code in this research repo. Humans: see `CONTRIBUTING.md`.
 
 ## Layout
 
-Two independent Python projects, each with its own uv environment.
+Three Python projects, each with its own uv environment.
 
 | Dir | Package / CLI | Toolchain |
 |---|---|---|
 | `brixzle/` | `brixzle` / `brixzle` | uv, Python 3.12 (CadQuery), MuJoCo drop trials, NSGA-III brick search, simulated drone; depends on `../flight` (editable) |
+| `dfbrick/` | `dfbrick` / `dfbrick` | uv, Python 3.12; distributed-funnel brick family; depends on `../brixzle` (editable) for scene, trials, error model, fork and simulated drone |
 | `flight/` | `flight` / `fly`, `flight-cal` | uv, cflib 0.1.33; real Crazyflie or simulator |
 
 `stl_exports/` holds CAD meshes. `runs/`, `assets/`, `.cache/`, weights and videos are git-ignored. `.claude/REPO_MAP.md` maps the modules: update it in the same change when you add, remove, rename or repurpose one.
@@ -19,13 +20,15 @@ Two independent Python projects, each with its own uv environment.
 cd brixzle && uv sync --all-extras && uv run pytest      # about 80 s
 uv run brixzle export --params configs/ab.json --out runs/v0
 uv run brixzle fly-assemble tower --bricks 1 --out runs/plan-single
+cd ../dfbrick && uv sync --all-extras && uv run pytest     # about 30 s
+uv run dfbrick drop --params configs/df-mean.json --approach-error ../brixzle/configs/error-exp3-r4.json --out ../runs/df-drop
 
 # flight/: run from the repo root so runs/ resolves
 uv run --project flight --extra test pytest flight/tests -q   # about 2 s, mocks cflib
 uv run --project brixzle fly runs/plan-single/plan.json --sim
 ```
 
-CI (`.github/workflows/tests.yml`) runs both pytest jobs on every PR and on `master`.
+CI (`.github/workflows/tests.yml`) runs the three pytest jobs on every PR and on `master`.
 
 ## Workflow
 
@@ -65,6 +68,7 @@ CI (`.github/workflows/tests.yml`) runs both pytest jobs on every PR and on `mas
 
 - **Mission vs. hardware (`flight/flight/`)**: `mission.py` talks only to the cflib API, an injected clock and a pose source, so one `plan.json` flies in MuJoCo (`--sim` lazily imports `brixzle`) or on a real Crazyflie. `fake.py` records cflib calls for dry runs; `checks.py` (offline) and `preflight.py` (live) gate real flights.
 - **Calibration (`flight/flight/calibration/`)**: Lighthouse geometry → overhead D455 registered to the Lighthouse frame via fixed AprilTags → `hover.py` (hover-check) and `visits.py` (tag-visit). `flight-cal` defaults to a dry-run route preview; `--check-only` runs preflight without arming; only `--arm` flies.
+- **dfbrick**: `params.py` (derived funnel sizes) → `geometry.py` convex pieces → `cad.py` solid → `rules.py` (incl. sizing for a measured error) → `lattice.py`/`structures.py` → `trials.py` (brixzle scene, settle loop and ErrorModel) → `fly.py` (brixzle drone, fork, mission).
 - **brixzle**: `params.py` → `profile.py`/`cad.py` geometry → `scene.py`/`trials.py` MuJoCo trials → `optimize.py` NSGA-III. `drone.py`, `cf/` and `simcf.py` simulate the Crazyflie for `fly-assemble`.
 
 Dependabot bumps uv and Actions weekly; minor and patch bumps auto-merge once checks pass.

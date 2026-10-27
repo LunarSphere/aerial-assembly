@@ -21,6 +21,12 @@ passive gripper that a Crazyflie can pick up and release without actuators.
   tag-visit checks. Decisions and results so far are in
   [`brixzle/docs/exp2/STATUS.md`](brixzle/docs/exp2/STATUS.md).
 
+- **Distributed-funnel bricks (DF-brick)** ([`dfbrick/`](dfbrick/README.md)). A
+  new brick family sized from the Experiment 3 measured approach error: two
+  nesting-cup feet on a rigid rail seat in parallel-throat square funnels with a
+  wide baseline. It runs the same drop, assembly, ring and `fly-assemble` trials
+  as brixzle, which it reuses.
+
 Results from simulation use uncalibrated contact and aerodynamics. They are not
 hardware success rates.
 
@@ -29,10 +35,11 @@ hardware success rates.
 | Path | What |
 |---|---|
 | [`brixzle/`](brixzle/README.md) | Brick geometry, MuJoCo trials, NSGA-III search, simulated drone and `fly-assemble` planner |
+| [`dfbrick/`](dfbrick/README.md) | Distributed-funnel brick family: geometry, rules, MuJoCo trials and simulated drone assembly, built on brixzle |
 | [`flight/`](flight/README.md) | cflib flight program (`fly`) and Experiment 2 calibration (`flight-cal`) |
 | [`stl_exports/`](stl_exports/) | CAD meshes, including the A/B bricks and the printable fork gripper |
 | [`.claude/`](.claude/REPO_MAP.md) | Module map and Claude Code project skills |
-| `.github/` | CI (pytest for `flight` and `brixzle`) and Dependabot |
+| `.github/` | CI (pytest for `flight`, `brixzle` and `dfbrick`) and Dependabot |
 
 Run outputs (`runs/`), generated assets, model weights and videos are
 git-ignored and stay local.
@@ -41,6 +48,7 @@ git-ignored and stay local.
 
 ```bash
 cd brixzle && uv sync --all-extras && uv run pytest
+cd ../dfbrick && uv sync --all-extras && uv run pytest
 cd .. && uv run --project flight --extra test pytest flight/tests -q
 ```
 

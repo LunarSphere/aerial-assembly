@@ -9,7 +9,8 @@ def test_size_reports_payload_and_source(tmp_path):
     out = tmp_path/'size.json'
     cli.main(['size', '--approach-error', ERROR, '--error-stat', 'mean', '--out', str(out)])
     r = json.loads(out.read_text())
-    assert r['params']['U'] == 44.5 and r['feasible']
+    assert r['params']['U'] == 44.5
+    assert [k for k, v in r['rules'].items() if v < 0] == ['mass_max']  # 1.7 g over the payload
     assert r['sized_for']['source']['run'] == 'runs/exp3-r4'
 
 

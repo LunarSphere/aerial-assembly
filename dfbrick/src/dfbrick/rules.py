@@ -18,8 +18,8 @@ class RuleSettings:
     mu_max: float = 0.4            # PLA-on-PLA upper estimate (as brixzle)
     slide_margin_deg: float = 8.
     placement_error: float = 10.   # X-Y approach error the receivers must capture (mm); set from Exp 3
-    mass_max: float = 24.7         # payload_max 30 g (brixzle drone_params) minus the 5.27 g fork
-                                   # (brixzle docs/exp2/gripper-fork-v0/gripper.json)
+    mass_max: float = 21.6         # payload_max 30 g (brixzle drone_params) minus the 8.4 g fork this
+                                   # brick needs (fly.make: tines long enough to span 2 x extent)
     min_feature: float = 1.2       # printable wall (3 perimeters at 0.4 mm)
     residual_tilt_deg: float = 6.  # tilt left when a foot meets its throat (as brixzle)
     max_yaw_play_deg: float = 1.   # seated yaw play allowed by the two feet

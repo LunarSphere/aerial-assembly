@@ -38,3 +38,19 @@ jobs:
           cache-dependency-glob: brixzle/uv.lock
       - run: uv sync --extra test
       - run: uv run pytest -q
+
+  dfbrick:
+    runs-on: ubuntu-latest
+    env:
+      MUJOCO_GL: disable
+    defaults:
+      run:
+        working-directory: dfbrick
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: dfbrick/uv.lock
+      - run: uv sync --extra test
+      - run: uv run pytest -q
