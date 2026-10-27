@@ -260,16 +260,18 @@ def camera_worker(args, rig, calibration, queue, stop, out):
             detector = None
             # The drone tag (issue #40) replaces the detector as the camera's measure of the drone.
             if (calibration.get('detector_model') and not getattr(args, 'camera_check_only', False)
-                    and getattr(args, 'drone_tag_id', None) is None):
+                    and getattr(args, 'drone_tag_size_m', None) is None):
                 from .drone import NanoDetector, observe
                 detector = NanoDetector(calibration['detector_model'])
             from scipy.spatial.transform import Rotation
             from ..frames import wxyz_to_xyzw
             rv = Rotation.from_quat(wxyz_to_xyzw(inv.quat)).as_rotvec()
             k, d = np.array(camera.intrinsics['matrix']), np.array(camera.intrinsics['distortion'])
-            if getattr(args, 'drone_tag_id', None) is not None:
+            drone_square = None
+            if getattr(args, 'drone_tag_size_m', None) is not None:
                 from .vision import drone_tag
-                tag = dict(id=args.drone_tag_id, size_m=args.drone_tag_size_m)
+                drone_square = dict(size_m=args.drone_tag_size_m)
+                floor_z = float(np.mean([t['pose']['pos'][2] for t in rig['tags']]))
             saved, last_saved = 0, -math.inf
             start_pose = inv.inverse()
             while not stop.is_set():
@@ -291,10 +293,11 @@ def camera_worker(args, rig, calibration, queue, stop, out):
                 if len(errors) < 8 or status['alignment_rms_px'] > 2.:
                     status['error'] = (f'Camera/tag projection mismatch ({status["alignment_rms_px"]} px); '
                                        'use --demo to refresh the camera pose against fixed tags')
-                if getattr(args, 'drone_tag_id', None) is not None:
-                    # Measured from the tag's own corners, independent of the detector and depth.
+                if drone_square is not None:
+                    # The tag's white square, independent of the detector and depth; X-Y is set offline.
                     try:
-                        status.update(drone_tag(found, tag, camera.intrinsics, inv.inverse().to_dict()) or {})
+                        status.update(drone_tag(frame.color, found, drone_square, camera.intrinsics,
+                                                inv.inverse().to_dict(), floor_z) or {})
                     except ValueError as e:
                         status['drone_tag_warning'] = str(e)
                 if detector is not None:

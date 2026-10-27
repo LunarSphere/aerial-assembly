@@ -78,15 +78,19 @@ def parser():
     p.add_argument('--dwell-s', type=float, default=5., help='hold over each tag centre, 0–30 seconds (default 5)')
     p.add_argument('--resume', help='existing session directory to continue (instead of --out)')
     p.add_argument('--save-metrics', action='store_true', help='write metrics.json and approach-errors.png after every trial')
-    p.add_argument('--drone-tag-id', type=int, help='AprilTag (same family as the floor tags) mounted on the drone over the deck centre')
-    p.add_argument('--drone-tag-size-m', type=float, help='printed black-square edge of the drone tag, metres')
-    p = commands.add_parser('drone-tag-check', help='camera only, no radio: how reliably the camera sees the AprilTag on the drone')
+    p.add_argument('--drone-tag-size-m', type=float, help='edge of the white square of the tag on the drone, metres; '
+                   'measures the drone by it instead of the detector')
+    p.add_argument('--drone-tag-height-m', type=float, help='height of the drone tag surface above the Lighthouse deck position, metres')
+    p = commands.add_parser('drone-tag-check', help='camera only, no radio: how reliably the camera finds the tag on the drone')
     p.add_argument('--setup', help='completed compact setup directory; fills rig, calibration and camera settings')
     p.add_argument('--rig')
     p.add_argument('--calibration', help='accepted camera session directory')
     p.add_argument('--out', required=True, help='new output directory')
-    p.add_argument('--drone-tag-id', type=int, required=True)
-    p.add_argument('--drone-tag-size-m', type=float, required=True, help='printed black-square edge, metres')
+    p.add_argument('--drone-tag-size-m', type=float, required=True, help='edge of the white square of the drone tag, metres')
+    p.add_argument('--height-m', type=float, required=True, help='height of the drone tag surface above the floor tags, metres')
+    p.add_argument('--near-px', type=float, nargs=2, metavar=('X', 'Y'),
+                   help="the drone tag's approximate pixel; without it, drone-tag-check.png circles every candidate")
+    p.add_argument('--gate-px', type=float, default=15., help='candidates farther than this from --near-px are not the drone (default 15)')
     p.add_argument('--frames', type=int, default=150, help='frames to measure, 1–3000 (default 150, about 5 s at 30 fps)')
     p.add_argument('--demo', action='store_true', help='use live intrinsics if the lens mapping drifted')
     camera_arguments(p)
@@ -168,9 +172,10 @@ def main(argv=None):
                 raise ValueError('Use --setup DIRECTORY, or provide --rig and --calibration')
             from .accuracy import drone_tag_check
             report = drone_tag_check(args, rig.load(args.rig))
-            print(f'Drone tag {report["drone_tag"]["id"]}: seen in {report["detected"]}/{report["frames"]} frames'
-                  + (f', X-Y spread {report["xy_std_m"]*1000:.1f} mm, height {report["height_m"]:.3f} m, '
-                     f'reprojection {report["reprojection_rms_px"]:.2f} px' if report['detected'] else '')
+            print(f'Drone tag: found in {report["detected"]}/{report["frames"]} frames '
+                  f'(median {report["candidates_per_frame"]:g} white-square candidates per frame)'
+                  + (f', centre {report["center_px"][0]:.2f}, {report["center_px"][1]:.2f} px, '
+                     f'X-Y spread {report["xy_std_m"]*1000:.2f} mm, square {report["size_px"]} px' if report['detected'] else '')
                   + f'. Report: {Path(args.out)/"drone-tag-check.json"}')
         elif args.command == 'devices':
             print(json.dumps(devices(args), indent=2))

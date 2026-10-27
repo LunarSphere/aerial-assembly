@@ -61,37 +61,62 @@ def _candidate_poses(world, pixels, intrinsics):
     return candidates[0]
 
 
-def drone_tag(found, tag, intrinsics, transform):
-    """Lighthouse-frame centre of the tag on the drone, from its own corners and printed size.
+def white_squares(gray, side_px, exclude=(), min_contrast=60.):
+    """Bright, square, compact blobs much brighter than the ring around them.
 
-    Single-tag IPPE: of the two planar solutions, keep the lower reprojection error. Both
-    place the centre at nearly the same point; they differ mostly in the tag's tilt.
-    Returns None when the tag is not in view.
+    Centres are background-subtracted, intensity-weighted centroids, so they are sub-pixel
+    even when the blob is only a few pixels across. Blobs inside ``exclude`` quads (decoded
+    floor tags, grown by half) are skipped: their white cells look the same.
     """
-    if tag['id'] not in found:
-        return None
     c = cv()
-    pixels = np.ascontiguousarray(found[tag['id']], float)
-    local = corners(dict(tag, pose=dict(pos=[0., 0., 0.], quat=[1., 0., 0., 0.])))
-    k = np.asarray(intrinsics['matrix'], float)
-    ok, rs, ts, _ = c.solvePnPGeneric(local, ideal_pixels(pixels, intrinsics), k, np.zeros(5),
-                                      flags=c.SOLVEPNP_IPPE_SQUARE)
-    if not ok:
-        raise ValueError(f'Drone tag {tag["id"]}: pose estimation failed')
-    candidates = []
-    for rvec, tvec in zip(rs, ts):
-        rms = float(np.sqrt(np.mean(np.sum((project_points(local, rvec, tvec, intrinsics)-pixels)**2, axis=1))))
-        candidates.append((rms, rvec, tvec.reshape(3)))
-    rms, rvec, tvec = min(candidates, key=lambda v: v[0])
-    if tvec[2] <= 0:
-        raise ValueError(f'Drone tag {tag["id"]}: pose is behind the camera')
+    g = np.asarray(gray, float)
+    mask = (g-c.boxFilter(g, -1, (31, 31)) > 40).astype(np.uint8)
+    n, labels, stats, _ = c.connectedComponentsWithStats(mask, connectivity=8)
+    grown = [np.mean(q, axis=0)+1.5*(np.asarray(q, float)-np.mean(q, axis=0)) for q in exclude]
+    blobs = []
+    for i in range(1, n):
+        x, y, w, h, area = stats[i]
+        side = (w+h)/2
+        if not side_px[0] <= side <= side_px[1] or max(w, h) > 1.5*min(w, h) or area < .5*w*h:
+            continue
+        pad = max(w, h)
+        x0, y0 = max(0, x-pad), max(0, y-pad)
+        x1, y1 = min(g.shape[1], x+w+pad), min(g.shape[0], y+h+pad)
+        ring = np.ones((y1-y0, x1-x0), bool)
+        ring[y-y0:y-y0+h, x-x0:x-x0+w] = False
+        surround = float(np.median(g[y0:y1, x0:x1][ring]))
+        contrast = float(np.median(g[y:y+h, x:x+w][labels[y:y+h, x:x+w] == i]))-surround
+        if contrast < min_contrast:
+            continue
+        bx0, by0 = max(0, x-1), max(0, y-1)
+        weights = np.clip(g[by0:y+h+1, bx0:x+w+1]-surround, 0, None)
+        yy, xx = np.mgrid[by0:by0+weights.shape[0], bx0:bx0+weights.shape[1]]
+        centre = np.array([(xx*weights).sum(), (yy*weights).sum()])/weights.sum()
+        if any(c.pointPolygonTest(q.astype(np.float32), tuple(map(float, centre)), False) >= 0 for q in grown):
+            continue
+        blobs.append(dict(center_px=centre.tolist(), size_px=[int(w), int(h)], contrast=contrast))
+    return blobs
+
+
+def drone_tag(image, found, tag, intrinsics, transform, floor_z, max_height_m=.8):
+    """Candidate rays through the white tag square on the drone (issue #40).
+
+    From the overhead camera the drone's tag is about 10 px across, too small to decode, so it
+    is found as a bright square blob. The expected size follows from its printed edge and the
+    range to anywhere between the floor and ``max_height_m`` above it. Cage and background clutter
+    can pass too, so every candidate is kept; offline, the one nearest Lighthouse is chosen.
+    """
+    c = cv()
     pose = Pose.from_dict(transform)
-    normal = pose.rotate(c.Rodrigues(rvec)[0][:, 2])
-    return dict(drone_tag_world_m=pose.apply(tvec).tolist(),
-                drone_tag=dict(id=tag['id'], size_m=tag['size_m'], center_px=pixels.mean(axis=0).tolist(),
-                               point_camera_m=tvec.tolist(), reprojection_rms_px=rms,
-                               tilt_deg=float(np.degrees(np.arccos(np.clip(normal[2], -1., 1.)))),
-                               candidate_spread_m=float(max(np.linalg.norm(t.reshape(3)-tvec) for t in ts))))
+    focal = float(np.mean(np.diag(np.asarray(intrinsics['matrix'], float))[:2]))
+    far = pose.pos[2]-floor_z
+    near = max(.2, far-max_height_m)
+    side_px = (.6*focal*tag['size_m']/far, 1.5*focal*tag['size_m']/near)
+    gray = c.cvtColor(image, c.COLOR_BGR2GRAY) if image.ndim == 3 else image
+    blobs = white_squares(gray, side_px, exclude=found.values())
+    rays = pose.rotate(pixel_rays([b['center_px'] for b in blobs], intrinsics)) if blobs else []
+    return dict(drone_tag_origin_m=list(pose.pos),
+                drone_tag_candidates=[dict(b, direction=list(map(float, r))) for b, r in zip(blobs, rays)])
 
 
 def solve(rig, observations, intrinsics):
