@@ -5,12 +5,14 @@ Keep this file current: when you add, remove, rename, or change the role of a mo
 ## Top level
 - `brixzle/` brick design, MuJoCo trials, NSGA-III search, drone assembly sim. Depends on `flight` (editable).
 - `dfbrick/` distributed-funnel brick family (#42), built on brixzle. Depends on `brixzle` and `flight` (editable).
+- `biasbrick/` biasbrick family (#45): half-brixzle sockets on a rod, aim bias, Y nest. Depends on `brixzle`, `dfbrick` and `flight` (editable).
+- `biasbrick3d/` the 3D corner-hopper version of #45, kept for comparison (geometry, rules, animation). Same dependencies.
 - `flight/` cflib flight program, Experiment 2 calibration and Experiment 3 approach accuracy (`fly`, `flight-cal`).
 - `figures/` figures with their data, generating scripts and notes: `exp3-approach-accuracy/` (Exp 3 raw logs, tables, figures; `segment_frames.py` SAM 2.1 mask centroids for the #26 box-vs-mask comparison), `lighthouse-rest-jitter.*` (Lighthouse jitter at rest vs calibration and battery).
 - `stl_exports/` CAD meshes (`2p5d_ab/`, `2p5d_ring/`, fork gripper) and `export_2p5d.py`.
-- `.github/` CI (`workflows/tests.yml`: `flight` and `brixzle` jobs) and Dependabot.
+- `.github/` CI (`workflows/tests.yml`: `flight`, `brixzle`, `dfbrick`, `biasbrick` and `biasbrick3d` jobs) and Dependabot.
 - `.claude/` this map and project skills (`skills/pick-up-issue`, `skills/grill-me`); root `CLAUDE.md`, `CONTRIBUTING.md`, `README.md` hold the rules and overview.
-- Git-ignored, local only: `runs/`, `assets/`, `.cache/`, weights, videos.
+- Git-ignored, local only: `runs/`, `results_*/` (videos and CAD moved out of `runs/`), `assets/`, `.cache/`, weights, videos.
 
 ## brixzle/src/brixzle (CLI: `brixzle`, entry `cli.py`)
 Geometry and design
@@ -40,6 +42,19 @@ Search and output
 - `trials.py` drops, X/Y/yaw capture sweeps, assembly, push (reuses brixzle `scene`, `run_until_settled`, `ErrorModel`)
 - `fly.py` DF fixture, pick/place primitives, plan compiler, harness (brixzle drone, fork, `flight.mission`), measured error as a per-placement Lighthouse bias
 - `configs/` df-mean, df-mean-slot, df-mean-peg, df-max; `tests/` pytest (about 30 s)
+
+## biasbrick/src/biasbrick (CLI: `biasbrick`, entry `cli.py`)
+- `params.py` `BBParams`: the brixzle profile fields of a socket, Y sawtooth (slope, nest face), flange, rod, fork sleeves, aim; `profile()` gives the brixzle `BrickParams`
+- `geometry.py` convex pieces: one brixzle voxel per socket (`socket_profile`, toothless under the nest), swept through the Y sawtooth (`rise`, `sweep`), flange, rod and V-roof sleeves, base; aim and catchment bands
+- `cad.py` CadQuery solid (sockets extruded with lightening holes, the rest hull-and-fuse), mass, STL/STEP; `render.py` views, stack, sections, capture-map PNGs
+- `rules.py` slide (incl. the V-groove factor on the Y slope), catchment around the aim, brixzle joint rules, one-course fit, fork, payload; `size_for_tolerance`
+- `lattice.py` sites along x, A/B by course, support, assembly order; `structures.py` tower, wall, bridge, overhang (no ring)
+- `trials.py` drops, capture sweeps and 2D capture maps (`best_aim`), assembly (dropped or `place`d), push, on brixzle's scene and settle loop
+- `animate.py` geometry-only stacking video (MuJoCo renderer)
+- `configs/` bb-mean, bb-p95; `tests/` pytest (about 20 s)
+
+## biasbrick3d/src/biasbrick3d (CLI: `biasbrick3d`, entry `cli.py`)
+- The 3D v1 of #45 (commit `23cb2f6`): `params.py`, `geometry.py` (corner hoppers, cup feet with a leaning tooth, shelled cavities), `cad.py`, `rules.py`, `render.py`, `animate.py`, `cli.py`; `configs/`, `tests/` (about 17 s)
 
 ## flight/flight (CLIs: `fly` -> `cli.py`, `flight-cal` -> `calibration/cli.py`)
 Mission (earlier, plan.json)

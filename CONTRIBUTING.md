@@ -19,7 +19,7 @@ Run `flight` commands from the repository root so `runs/` paths resolve. The har
 2. **Branch from `master`**, named `<issue#>-short-name` (for example `17-gradient-optimizer`). One issue, one branch, one PR.
 3. **Test first.** Write a failing test, make it pass, then clean up. New behaviour needs a new test. Bug fixes need a test that reproduced the bug.
 4. **Open a PR** with `Closes #N` in the body. Say what changed, which tests you ran, and the evidence behind any numbers (see below).
-5. **Review.** The maintainer reviews and merges, or asks Claude to merge. CI (`flight`, `brixzle` and `dfbrick` pytest) must be green.
+5. **Review.** The maintainer reviews and merges, or asks Claude to merge. CI (`flight`, `brixzle`, `dfbrick`, `biasbrick` and `biasbrick3d` pytest) must be green.
 
 Keep commits small, with an imperative subject ("Add lip gene to NSGA bounds"). When you add, move or repurpose a module, update `.claude/REPO_MAP.md` in the same PR. When an Experiment 2 decision changes, update `brixzle/docs/exp2/STATUS.md`.
 
