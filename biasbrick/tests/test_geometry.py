@@ -5,67 +5,18 @@ import pytest
 from scipy.spatial import ConvexHull
 import trimesh
 
-from biasbrick import cad, geometry as G, rules as R
+from brixzle import profile as pr
+from biasbrick import cad, geometry as G
 from biasbrick.params import DEFAULT, BBParams
 
 
 @pytest.fixture(scope='module')
-def brick():
-    return cad.build_brick(DEFAULT)
+def bricks():
+    return {k: cad.build_brick(DEFAULT, part=k) for k in ('A', 'B')}
 
 
-def test_params_validate():
-    with pytest.raises(ValueError):
-        BBParams.from_dict({'U': 49.5, 'flare': 35.})
-    with pytest.raises(ValueError):
-        BBParams(part='Z')
-    with pytest.raises(ValueError):
-        BBParams(U=12.)
-    with pytest.raises(ValueError):
-        BBParams(ramp=float('nan'))
-    with pytest.raises(ValueError):
-        BBParams(alpha=65.)
-    assert BBParams.from_dict({**DEFAULT.to_dict(), 'derived': {}}) == DEFAULT
-
-
-def test_seat_is_in_the_minus_x_minus_y_corner():
-    p = DEFAULT
-    assert p.seat < 0
-    # The side wall's outer face sits half an end gap inside the voxel's -x-y edges.
-    assert p.seat - p.throat - p.wall_t == pytest.approx(-p.U/2 + p.end_gap/2)
-    assert p.reach == pytest.approx(p.U/2 - p.end_gap/2 - p.seat)
-    assert p.seat_xy(0) == (pytest.approx(-p.U + p.seat), pytest.approx(p.seat))
-
-
-def test_ramps_reach_the_ridge_and_the_rail_clears_it():
-    p = DEFAULT
-    assert G.ramp_z(p, p.reach, 0.) == pytest.approx(p.guide_h)
-    assert G.ramp_z(p, p.throat + p.lean_shift, 0.) == pytest.approx(p.slot_h)
-    assert p.foot_L - p.guide_h == pytest.approx(p.top_gap)
-
-
-def test_aim_covers_error_and_yaw_on_both_axes():
-    p = DEFAULT
-    near, far = R.landing(p, p.aim_r)
-    assert near == (pytest.approx(p.aim_margin), pytest.approx(p.aim_margin))
-    assert p.aim[1] > p.aim[0]  # yaw moves the feet across the brick far more than along it
-
-
-def test_pieces_are_convex_and_solid(brick):
-    for v in brick['collision']:
-        hull = trimesh.convex.convex_hull(v)
-        assert hull.volume > 0
-        assert len(np.unique(np.round(v, 6), axis=0)) == len(np.unique(np.round(hull.vertices, 6), axis=0))
-
-
-def test_solid_is_one_watertight_piece(brick):
-    assert brick['fragments'] == 1
-    assert brick['mesh'].is_watertight
-    assert brick['volume'] == pytest.approx(cad.collision_volume(brick), rel=0.1)
-
-
-def _hulls(pieces, dz=0.):
-    return [ConvexHull(np.asarray(v) + [0., 0., dz]).equations for v in pieces]
+def _hulls(pieces, shift=(0., 0., 0.)):
+    return [ConvexHull(np.asarray(v) + shift).equations for v in pieces]
 
 
 def _inside(hulls, pts, depth=0.):
@@ -75,89 +26,127 @@ def _inside(hulls, pts, depth=0.):
     return np.any([np.all(h @ eq.T <= -depth, axis=1) for eq in hulls], axis=0)
 
 
-def _sample(piece, n, rng):
-    """Points inside a convex piece: random convex combinations of its vertices."""
-    return rng.dirichlet(np.ones(len(piece)), n) @ np.asarray(piece)
+def _sample(pieces, n=150, seed=0):
+    rng = np.random.default_rng(seed)
+    return np.vstack([rng.dirichlet(np.ones(len(v)), n) @ v for v in pieces] + list(pieces))
 
 
-def test_cup_foot_nests_in_the_hopper_below(brick):
-    """Two courses of a tower do not overlap: the cup sits clearance off every hopper face."""
+def _overlap(a, b, shift, depth=0.05):
+    """Does piece set ``b`` moved by ``shift`` overlap piece set ``a``? Checked both ways."""
+    b = [np.asarray(v) + shift for v in b]
+    return _inside(_hulls(a), _sample(b), depth).any() or _inside(_hulls(b), _sample(a), depth).any()
+
+
+def test_params_validate():
+    with pytest.raises(ValueError):
+        BBParams.from_dict({'U': 36., 'ramp': 41.})
+    with pytest.raises(ValueError):
+        BBParams(part='X')
+    with pytest.raises(ValueError):
+        BBParams(slope=float('nan'))
+    with pytest.raises(ValueError):
+        BBParams(rod_L=-1.)
+    with pytest.raises(ValueError):
+        BBParams(nest_w=30.)
+    assert BBParams.from_dict({**DEFAULT.to_dict(), 'derived': {}}) == DEFAULT
+    assert DEFAULT.profile().gutter == 0.  # the Y shear is biasbrick's own, one-sided
+
+
+@pytest.mark.parametrize('part', ['A', 'B'])
+def test_socket_is_one_voxel_of_the_brixzle_part(part):
     p = DEFAULT
-    lower = _hulls(brick['collision'])
-    rng = np.random.default_rng(0)
-    sx, sy = p.seat_xy(0)
-    feet = [q + [0., 0., p.H0] for seat in G.feet_seats(p) for q in G.foot_pieces(p, seat)]
-    pts = np.vstack([_sample(q, 4000, rng) for q in feet] + [q for q in feet])
-    # No part of the upper brick's feet is inside the lower brick (0.05 mm tolerance).
-    assert not _inside(lower, pts, depth=0.05).any()
-    # The seated tooth is in the slot, on its axis just above its tip.
-    h = p.slot_extra + 0.5
-    tip = [sx + h*p.lean_k, sy + h*p.lean_k, p.bar_h + h]
-    assert _inside(_hulls(feet), tip).all()
-    assert not _inside(lower, tip).any()
+    prof = G.socket_profile(p, part)
+    whole = pr.brick_parts(p.profile(), part)['outer']
+    assert prof['fragments'] == 1 and len(prof['slots']) == 1 and len(prof['teeth']) == 1
+    assert prof['outer'].area == pytest.approx(whole.area/2, rel=0.05)
+    lo, hi = prof['outer'].bounds[0], prof['outer'].bounds[2]
+    assert (lo, hi) == (pytest.approx(-p.U/2 + p.end_gap/2), pytest.approx(p.U/2 - p.end_gap/2))
 
 
-def test_slot_leans_alpha_along_the_diagonal():
+def test_courses_register_b_keel_on_a_valley():
     p = DEFAULT
-    plus_x = G.hopper_pieces(p, (0., 0.), 0.)[0]  # the +x slot plate
-    bottom = plus_x[plus_x[:, 2] == 0.]
-    top = plus_x[np.isclose(plus_x[:, 2], p.slot_h)]
-    shift = top[:, :2].min(0) - bottom[:, :2].min(0)
-    assert shift == pytest.approx([p.lean_shift, p.lean_shift])
-    assert math.degrees(math.atan(np.hypot(*shift)/p.slot_h)) == pytest.approx(p.alpha)
+    assert G.socket_profile(p, 'B')['keel'][0] == pytest.approx(G.seat_x(p, 'A'))
+    assert G.socket_profile(p, 'A')['keel'][0] == pytest.approx(G.seat_x(p, 'B'))
 
 
-def test_seated_tooth_hooks_and_leaves_along_its_axis():
-    """Straight up, the tooth hits the slot's overhanging walls; backwards along its axis it is free."""
+@pytest.mark.parametrize('part', ['A', 'B'])
+def test_pieces_are_convex_and_the_solid_is_one_watertight_piece(bricks, part):
+    b = bricks[part]
+    for v in b['collision']:
+        hull = trimesh.convex.convex_hull(v)
+        assert hull.volume > 0
+        assert len(np.unique(np.round(v, 6), axis=0)) == len(np.unique(np.round(hull.vertices, 6), axis=0))
+    assert b['fragments'] == 1 and b['mesh'].is_watertight
+
+
+@pytest.mark.parametrize('lower,upper', [('A', 'B'), ('B', 'A')])
+def test_tower_courses_nest_without_overlap(lower, upper):
+    """Seated one course up, nothing overlaps: sockets nest, and the lip, rod and sleeves fit in a course
+    (the rod once poked out of the end face's falling top into the keel above)."""
     p = DEFAULT
-    slot = _hulls(G.hopper_pieces(p, (0., 0.), 0.)[:4])
-    tooth = G.foot_pieces(p)[0] + [0., 0., p.foot_L]
-    rng = np.random.default_rng(0)
-    pts = np.vstack([_sample(tooth, 4000, rng), tooth])
-    pts = pts[pts[:, 2] < p.slot_h]  # the part inside the slot
-    assert not _inside(slot, pts, depth=0.02).any()
-    # The tip stops slot_extra above the floor: the brick bears on its cups, not on the tooth.
-    assert pts[:, 2].min() == pytest.approx(p.slot_extra)
-    lift = (p.clearance + p.tooth_taper/2)/p.lean_k + 0.5
-    assert _inside(slot, pts + [0., 0., lift], depth=0.1).any()
-    axis = np.array([p.lean_k, p.lean_k, 1.])
-    for h in (1., 3., 6.):
-        assert not _inside(slot, pts + h*axis, depth=0.02).any()
+    assert not _overlap(G.brick_pieces(p, lower), G.brick_pieces(p, upper), [0., 0., p.H0])
 
 
-def test_cavity_is_a_shelled_square_with_a_v_roof(brick):
+def test_course_zero_nests_on_the_base():
     p = DEFAULT
-    mesh = _hulls(brick['collision'])
-    y0, y1 = brick['cavity_y']
-    ym = (y0 + y1)/2
-    h = G.cavity_half(p)
-    assert len(brick['channels']) == 2
-    for x, z in brick['channels']:
-        # The tine as carried, and the whole square inside, is empty space; the shell around it is solid.
-        assert not _inside(mesh, [[x, ym, z], [x - h + 0.2, ym, z - 2*h + 2], [x + h - 0.2, ym, z - 2*h + 2]]).any()
-        assert _inside(mesh, [[x - h - p.cav_wall/2, ym, z - h], [x + h + p.cav_wall/2, ym, z - h]]).all()
-        # The V roof: just above the tine is solid, and the roof is lower at the sides than at the apex.
-        assert _inside(mesh, [x, ym, z + p.fork_d/2/math.cos(math.radians(p.roof_angle)) + 0.3]).all()
-        assert _inside(mesh, [x - h + 0.3, ym, z + 0.5]).all()
-        # The fork enters from the -y face through an open mouth wider than the cavity.
-        assert not _inside(mesh, [[x - h - 1., y0 + 0.2, z - h], [x, y0 + 0.2, z]]).any()
+    base = G.base_pieces(p, [p.socket_x(0), p.socket_x(1)], 'A')
+    assert not _overlap(base, G.brick_pieces(p, 'A'), [0., 0., 0.])
 
 
-def test_y_part_mirrors_so_its_seats_point_world_minus_x_minus_y():
+def _tooth_sockets(p, part):
+    return [q for i in (0, 1) for q in G.sweep(p, [G.socket_profile(p, part)['outer']], -p.D/2, p.D/2, p.socket_x(i))]
+
+
+def test_seated_tooth_hooks_and_leaves_along_its_stroke():
+    """Straight up, a seated B's teeth hit A's slots; backwards along the stroke (up and toward +x) they are free."""
     p = DEFAULT
-    x_pieces = G.brick_pieces(p)
-    y_pieces = G.brick_pieces(BBParams(**{**p.to_dict(), 'part': 'Y'}))
-    assert all(np.allclose(a*[1, -1, 1], b) for a, b in zip(x_pieces, y_pieces))
-    # Placed at yaw +90, (x, y) -> (-y, x): each Y-part seat lands in the -x-y corner of its world voxel.
-    rot = lambda x, y: (-y, x)  # noqa: E731
-    for i in range(p.n_vox):
-        sx, sy = p.seat_xy(i)
-        vx, vy = rot(p.voxel_x(i), 0.)
-        wx, wy = rot(sx, -sy)
-        assert (wx - vx, wy - vy) == (pytest.approx(p.seat), pytest.approx(p.seat))
+    low, up = _tooth_sockets(p, 'A'), _tooth_sockets(p, 'B')
+    assert _overlap(low, up, [0., 0., p.H0 + 3.])
+    d = -np.array([math.cos(math.radians(90 - p.alpha)), 0., math.sin(math.radians(90 - p.alpha))])
+    for t in (1., 3., 6.):
+        assert not _overlap(low, up, np.array([0., 0., p.H0]) - t*d)
 
 
-def test_base_has_a_hopper_per_voxel():
+def test_brick_slides_down_the_y_slope_into_its_nest():
     p = DEFAULT
-    pieces = G.base_pieces(p, [(0., 0.), (p.U, 0.)])
-    assert len(pieces) == 2*(1 + len(G.hopper_pieces(p)))
+    low, up = G.brick_pieces(p, 'A'), G.brick_pieces(p, 'B')
+    for dy in (5., 15., 30.):  # resting on the main slope (and the flange) at any landing offset
+        assert not _overlap(low, up, [0., dy, p.H0 + p.shear_k*dy + 0.05])
+    # It cannot slide on past the seat toward -y: the keel meets the nest face, and the hooked tooth
+    # meets the slot channel's bend at the valley (a stop it cannot ride over, unlike a lip).
+    for dz in (0.05, p.nest_k + 0.05):
+        assert _overlap(low, up, [0., -1., p.H0 + dz])
+
+
+def test_rise_is_an_asymmetric_sawtooth_in_y():
+    p = DEFAULT
+    assert G.rise(p, p.valley_y) == 0.
+    assert G.rise(p, p.valley_y + 10.) == pytest.approx(10*p.shear_k)
+    assert G.rise(p, -p.D/2) == pytest.approx(p.nest_w*p.nest_k)
+
+
+def test_tines_pass_through_the_sleeves_and_hang_in_the_v_roof(bricks):
+    p = DEFAULT
+    b = bricks['A']
+    solid = _hulls(b['collision'])
+    y0, y1 = b['sleeve_y']
+    ys = np.linspace(y0 - 2, y1 + 2, 60)
+    r = p.fork_d/2
+    for x, z in b['channels']:
+        for dx, dz in ((0., 0.), (r, 0.), (-r, 0.), (0., -r)):
+            assert not _inside(solid, np.column_stack([np.full_like(ys, x + dx), ys, np.full_like(ys, z + dz)]), 0.02).any()
+        # The V roof sits right over the tine, and the whole square inside is open for a coarse tine.
+        apex_gap = r/math.cos(math.radians(p.roof_angle)) - r
+        assert _inside(solid, [x, (y0 + y1)/2, z + r + apex_gap + 0.4]).all()
+        h = G.cavity_half(p)
+        floor = z - 2*h + 2
+        assert not _inside(solid, [[x - h + 0.2, (y0 + y1)/2, floor], [x + h - 0.2, (y0 + y1)/2, floor]], 0.02).any()
+
+
+def test_sleeves_straddle_the_com_and_cross_the_rod(bricks):
+    p = DEFAULT
+    b = bricks['A']
+    (x0, z0), (x1, z1) = b['channels']
+    assert z0 == z1 and x0 < b['com'][0] < x1
+    y0, y1 = b['sleeve_y']
+    assert y0 < p.rod_y - p.rod_w/2 and p.rod_y + p.rod_w/2 < y1

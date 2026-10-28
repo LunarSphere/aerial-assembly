@@ -1,233 +1,277 @@
-"""biasbrick geometry as convex pieces (mm), the source of truth for collision and the CAD solid.
+"""biasbrick geometry: brixzle's A/B profile cut into sockets, swept one-sided in Y, joined by a rod.
 
-Brick frame: x along the brick, centred on its middle voxel; y across; z = 0 is the rail bottom.
-The hoppers stand on the rail top (z = bar_h); the cup feet hang below z = 0.
-
-Each piece is built in seat-local coordinates (du, dv) from a seat's centre at its slot floor,
-then moved to the seat. The slot plates and the tooth lean: a point h above the slot floor shifts
-by h lean_k along +du and +dv (alpha from vertical along the diagonal), so going down, the seat
-moves into the -x-y corner. Above the slot nothing leans. A hopper is symmetric about its diagonal
-du = dv, so the Y part (the X part mirrored in y, placed at yaw 90) has the same hoppers in the
-world frame.
+Everything is convex pieces (mm), the source of truth for collision and the CAD solid, as in
+brixzle: a socket is one voxel of brixzle's A (or B) outer profile (``profile.brick_parts``,
+clipped to the voxel), decomposed into convex polygons (``convex.convex_parts``) and swept through
+Y in two affine bands either side of the Y valley (``rise``): the main slope toward +y and the
+nest face toward -y, so every piece stays convex. The flange is a band under the socket's top line,
+swept along the main slope past the +y face.
+The rod and the fork sleeves are boxes and prisms in the brick frame; nothing of them is sheared.
 """
 import math
 
 import numpy as np
+from shapely import affinity
+from shapely.geometry import Polygon, box
+from shapely.ops import unary_union
+
+from brixzle import profile as pr
+from brixzle.convex import convex_parts
 
 from .params import BBParams
+
+
+def _geoms(g):
+    if g.is_empty:
+        return []
+    gs = [g] if g.geom_type == 'Polygon' else [h for h in getattr(g, 'geoms', []) if h.geom_type == 'Polygon']
+    return [h for h in gs if h.area > 1e-3]
 
 
 def _box(x0, x1, y0, y1, z0, z1):
     return np.array([[x, y, z] for x in (x0, x1) for y in (y0, y1) for z in (z0, z1)], float)
 
 
-def _lean(pts, k, z_ref):
-    """Shear points by k per mm above z_ref along +x and +y (seat-local, so about the seat)."""
-    pts = np.array(pts, float)
-    h = pts[:, 2] - z_ref
-    pts[:, 0] += k*h
-    pts[:, 1] += k*h
-    return pts
+def rise(p: BBParams, y):
+    """Z shift of the swept socket at y: zero along the Y valley, up the main slope toward +y and up
+    the nest face toward -y (an asymmetric sawtooth in Y, which the keel copies)."""
+    d = np.asarray(y, float) - p.valley_y
+    return np.where(d >= 0, p.shear_k*d, -p.nest_k*d)
 
 
-def _plate(poly, z_of, below, above):
-    """Prism over an (du, dv) polygon between z_of(du, dv) - below and z_of(du, dv) + above (z_of linear)."""
-    return np.array([[u, v, z_of(u, v) + dz] for u, v in poly for dz in (-below, above)], float)
+def bands(p: BBParams, y0, y1):
+    """[y0, y1] split at the valley, so each part is one affine band."""
+    v = p.valley_y
+    return [(a, b) for a, b in ((y0, min(y1, v)), (max(y0, v), y1)) if b - a > 1e-9]
 
 
-def _extrude_v(poly, v0, v1):
-    """(du, z) polygon extruded from dv = v0 to v1."""
-    return np.array([[u, v, z] for u, z in poly for v in (v0, v1)], float)
-
-
-def _extrude_u(poly, u0, u1):
-    """(dv, z) polygon extruded from du = u0 to u1."""
-    return np.array([[u, v, z] for v, z in poly for u in (u0, u1)], float)
-
-
-def _drop(p: BBParams):
-    """Vertical thickness of a plate of normal thickness wall_t on a ramp."""
-    return p.wall_t/math.cos(math.radians(p.ramp))
-
-
-def ramp_z(p: BBParams, d, z0):
-    """Height of a hopper's ramp surface at distance d (along +x or +y) from its seat centre."""
-    return z0 + p.slot_h + (d - p.throat - p.lean_shift)*math.tan(math.radians(p.ramp))
-
-
-def ridge_z(p: BBParams, z0):
-    return z0 + p.guide_h
-
-
-def _wall_top(p: BBParams, z0):
-    """(d, z) corners of a side wall's top: stop_h above the ramp, capped at the ridge."""
-    t, s, zp, top = p.throat, p.lean_shift, z0 + p.slot_h, ridge_z(p, z0)
-    T = math.tan(math.radians(p.ramp))
-    d_cap = t + s + max(p.ramp_h - p.stop_h, 0.)/T
-    return [(t + s, min(zp + p.stop_h, top)), (d_cap, top), (p.reach, top)]
-
-
-def hopper_pieces(p: BBParams, seat=(0., 0.), z0=None):
-    """Convex pieces of one corner hopper whose seat centre is at ``seat`` (x, y) and slot floor at z0."""
-    z0 = p.bar_h if z0 is None else z0
-    t, w, s, R = p.throat, p.wall_t, p.lean_shift, p.reach
-    zp = z0 + p.slot_h
-    drop = _drop(p)
+def sweep(p: BBParams, polys, y0, y1, dx=0.):
+    """Convex pieces of (x, z) polygons swept from y0 to y1 through the Y sawtooth, moved by dx."""
     pieces = []
-    # Slot: four leaning plates round the seat; the -x and -y ones overhang the seated tooth (the hook).
-    for u0, u1, v0, v1 in ((t, t + w, -t - w, t + w), (-t - w, -t, -t - w, t + w),
-                           (-t, t, t, t + w), (-t, t, -t - w, -t)):
-        pieces.append(_lean(_box(u0, u1, v0, v1, z0, zp), p.lean_k, z0))
-    # Ramps: +x below the diagonal crease, +y above it.
-    rz = lambda d: ramp_z(p, d, z0)  # noqa: E731
-    pieces.append(_plate([(t + s, -t + s), (R, -t + s), (R, R), (t + s, t + s)], lambda u, v: rz(u), drop, 0.))
-    pieces.append(_plate([(-t + s, t + s), (t + s, t + s), (R, R), (-t + s, R)], lambda u, v: rz(v), drop, 0.))
-    # Side walls on -x and -y: stop_h above the slot mouth, then along each ramp's edge up to the ridge.
-    flat = min(zp + p.stop_h, ridge_z(p, z0))
-    pieces.append(_box(-t - w + s, t + s, -t - w + s, -t + s, zp - 1., flat))
-    pieces.append(_box(-t - w + s, -t + s, -t - w + s, t + s, zp - 1., flat))
-    top = _wall_top(p, z0)
-    band = [(t + s, zp - drop), (R, rz(R) - drop)] + top[::-1]
-    pieces.append(_extrude_v(band, -t - w + s, -t + s))
-    pieces.append(_extrude_u(band, -t - w + s, -t + s))
-    return [q + np.array([seat[0], seat[1], 0.]) for q in pieces]
-
-
-def foot_pieces(p: BBParams, seat=(0., 0.)):
-    """A nesting cup under the seat: its outer faces copy the hopper, moved toward the seat by the clearance.
-
-    The tooth is the leaning, tapered, chamfered square that enters the slot, coaxial with it and
-    ``slot_extra`` short of its floor; the +x and +y plates copy the ramps; the -x and -y plates copy
-    the side walls and close the shell up to the rail.
-    """
-    a, c, ch, w, s, R = p.half_foot, p.clearance, p.tip_chamfer, p.wall_t, p.lean_shift, p.reach
-    T = math.tan(math.radians(p.ramp))
-    floor = -p.foot_L  # the slot floor of the course below, when seated
-    zp = floor + p.slot_h
-    tip = floor + p.slot_extra
-    drop = _drop(p)
-    cup = lambda d: zp + (d - a - s)*T  # noqa: E731  outer face: the ramp moved toward the seat by c
-    a_tip = a - p.tooth_taper/2
-    tooth = []
-    for h, z in ((a, zp + drop), (a_tip, tip + ch), (a_tip - ch, tip)):
-        tooth += [[sx*h, sy*h, z] for sx in (-1, 1) for sy in (-1, 1)]
-    pieces = [_lean(tooth, p.lean_k, floor)]
-    e = R - c
-    pieces.append(_plate([(a + s, -a + s), (e, -a + s), (e, e), (a + s, a + s)], lambda u, v: cup(u), 0., drop))
-    pieces.append(_plate([(-a + s, a + s), (a + s, a + s), (e, e), (-a + s, e)], lambda u, v: cup(v), 0., drop))
-    pieces.append(_box(e - w, e, -a + s, e, -p.top_gap, 0.))
-    pieces.append(_box(-a + s, e, e - w, e, -p.top_gap, 0.))
-    side = [(-a + s, zp), (a + s, zp), (e, cup(e)), (e, 0.), (-a + s, 0.)]
-    pieces.append(_extrude_v(side, -a + s, -a + s + w))
-    pieces.append(_extrude_u(side, -a + s, -a + s + w))
-    return [q + np.array([seat[0], seat[1], 0.]) for q in pieces]
-
-
-def feet_seats(p: BBParams):
-    return [p.seat_xy(0), p.seat_xy(p.n_vox - 1)]
-
-
-def rail_width(p: BBParams):
-    """The rail carries every throat and the side walls' feet."""
-    return 2*(p.throat + p.wall_t)
-
-
-def rail_piece(p: BBParams):
-    x0 = p.voxel_x(0) - p.U/2 + p.end_gap/2
-    x1 = p.voxel_x(p.n_vox - 1) + p.U/2 - p.end_gap/2
-    y0 = p.seat - p.throat - p.wall_t
-    return _box(x0, x1, y0, y0 + rail_width(p), 0., p.bar_h)
-
-
-def cavity_half(p: BBParams):
-    """Half-width of a fork cavity's square inside."""
-    return p.fork_d/2 + p.cav_play
-
-
-def _cavity(p: BBParams, i):
-    """Section numbers of the fork cavity under the +x ridge of voxel i (brick frame, mm)."""
-    h, cw = cavity_half(p), p.cav_wall
-    xs = p.seat_xy(i)[0]
-    xr = p.voxel_x(i) + p.U/2 - p.end_gap/2  # the ramp's far edge
-    xc = xr - cw - h
-    under = lambda x: ramp_z(p, x - xs, p.bar_h) - _drop(p) + 0.5  # noqa: E731  fused 0.5 mm into the ramp
-    apex = under(xc - h - cw) - cw
-    side = apex - h*math.tan(math.radians(p.roof_angle))
-    return {'xc': xc, 'xl': xc - h - cw, 'xr': xr, 'h': h, 'under': under, 'apex': apex, 'side': side,
-            'floor': side - 2*h}
-
-
-def _cavity_sections(p: BBParams, i, grow=0.):
-    """(x, z) polygons of one cavity's shell; ``grow`` opens the walls and floor outward (the mouth)."""
-    c = _cavity(p, i)
-    xc, h, cw, under = c['xc'], c['h'], p.cav_wall, c['under']
-    fl = c['floor'] - grow
-    xl, xi, xo, xr = xc - h - cw - grow, xc - h - grow, xc + h + grow, xc + h + cw + grow
-    left = [(xl, fl - cw), (xi, fl - cw), (xi, under(xi)), (xl, under(xl))]
-    right = [(xo, fl - cw), (xr, fl - cw), (xr, under(xr)), (xo, under(xo))]
-    floor = [(xi, fl - cw), (xo, fl - cw), (xo, fl), (xi, fl)]
-    roof_l = [(xc - h, c['side']), (xc, c['apex']), (xc, under(xc)), (xc - h, under(xc - h))]
-    roof_r = [(xc, c['apex']), (xc + h, c['side']), (xc + h, under(xc + h)), (xc, under(xc))]
-    return [left, right, floor, roof_l, roof_r]
-
-
-def cavity_y(p: BBParams):
-    """Y span of the fork cavities: from the brick's -y face (where the fork enters) for cav_depth."""
-    y0 = p.seat - p.throat - p.wall_t
-    return y0, y0 + p.cav_depth
-
-
-def cavity_voxels(p: BBParams):
-    """Voxels whose +x ridge carries a cavity: the two inner ridges nearest the centre."""
-    ridges = list(range(p.n_vox - 1))
-    if len(ridges) > 2:
-        ridges = sorted(ridges, key=lambda i: abs(p.voxel_x(i) + p.U/2))[:2]
-    return sorted(ridges)
-
-
-def channels(p: BBParams):
-    """(x, z) of each tine's centre when the brick hangs on it: wedged into the V roof's apex."""
-    out = []
-    for i in cavity_voxels(p):
-        c = _cavity(p, i)
-        out.append((float(c['xc']), float(c['apex'] - p.fork_d/2/math.cos(math.radians(p.roof_angle)))))
-    return out
-
-
-def cavity_pieces(p: BBParams):
-    """Shelled square tubes with a V roof, hung from the ramp underside and posted to the rail."""
-    y0, y1 = cavity_y(p)
-    ym = y0 + min(p.cav_chamfer, p.cav_depth)
-    pieces = []
-    for i in cavity_voxels(p):
-        c = _cavity(p, i)
-        for open_, sec in zip(_cavity_sections(p, i, p.cav_chamfer), _cavity_sections(p, i)):
-            pieces.append(np.array([[x, y1, z] for x, z in sec] + [[x, ym, z] for x, z in sec], float))
-            pieces.append(np.array([[x, ym, z] for x, z in sec] + [[x, y0, z] for x, z in open_], float))
-        post_top = c['floor'] - p.cav_wall
-        if post_top > p.bar_h:
-            pieces.append(_box(c['xl'], c['xr'], y0, y0 + rail_width(p), p.bar_h - 0.5, post_top + 0.5))
+    for poly in polys:
+        for g in _geoms(poly):
+            for q in convex_parts(np.asarray(g.simplify(1e-4).exterior.coords)[:-1]):
+                for a, b in bands(p, y0, y1):
+                    near = np.column_stack([q[:, 0] + dx, np.full(len(q), a), q[:, 1] + rise(p, a)])
+                    far = np.column_stack([q[:, 0] + dx, np.full(len(q), b), q[:, 1] + rise(p, b)])
+                    pieces.append(np.vstack([near, far]))
     return pieces
 
 
-def _mirror(pieces):
-    return [q*np.array([1., -1., 1.]) for q in pieces]
+def _flags(p: BBParams, part=None):
+    """(top mirrored, bottom mirrored, top slots reversed, bottom teeth reversed) of a part."""
+    return pr.PART_FLAGS[part or p.part]
 
 
-def brick_pieces(p: BBParams):
-    pieces = [rail_piece(p)]
-    for i in range(p.n_vox):
-        pieces += hopper_pieces(p, p.seat_xy(i))
-    for seat in feet_seats(p):
-        pieces += foot_pieces(p, seat)
-    pieces += cavity_pieces(p)
-    return _mirror(pieces) if p.part == 'Y' else pieces
+def top_line(p: BBParams, x, part=None):
+    """Socket top surface along the Y valley (socket frame, x centred)."""
+    bp = p.profile()
+    return pr.sawtooth(bp, np.asarray(x, float) + bp.U/2, _flags(p, part)[0]) + bp.H0
 
 
-def base_pieces(p: BBParams, voxels, thickness=4.):
-    """Anchored base: a hopper over each world voxel centre (x, y), throat bottoms at z = 0, on a slab."""
+def bottom_line(p: BBParams, x, part=None):
+    bp = p.profile()
+    return pr.sawtooth(bp, np.asarray(x, float) + bp.U/2, _flags(p, part)[1])
+
+
+def _centre(g, U):
+    return affinity.translate(g, -U/2, 0.)
+
+
+def socket_profile(p: BBParams, part=None):
+    """One voxel of brixzle's part profile, x centred: outer, lightening holes, slots and teeth."""
+    part = part or p.part
+    bp = p.profile()
+    parts = pr.brick_parts(bp, part)
+    e = bp.end_gap/2
+    lo, hi = parts['outer'].bounds[1] - 1, parts['outer'].bounds[3] + 1
+    pieces = _geoms(parts['outer'].intersection(box(e, lo, bp.U - e, hi)))
+    outer = max(pieces, key=lambda g: g.area)
+    holes = []
+    inner = box(e + bp.wall, lo, bp.U - e - bp.wall, hi)
+    for h in pr.lightening_holes(bp, parts):
+        holes += [g for g in _geoms(h.intersection(inner)) if g.area > 6.]
+    mine = lambda pts: [i for i, v in enumerate(pts) if 0 < v[0] < bp.U]  # noqa: E731
+    slots = [parts['slots'][i] for i in mine(parts['valleys'])]
+    teeth = [parts['teeth'][i] for i in mine(parts['keels'])]
+    valley = parts['valleys'][mine(parts['valleys'])[0]]
+    keel = parts['keels'][mine(parts['keels'])[0]]
+    # Under the nest face the socket has no tooth: the slot channel bends at the Y valley, so a rigid
+    # tooth there would be lifted against its hook while the brick slides down the main slope.
+    xs = pr.breakpoints(bp, -1., bp.U + 1., _flags(p, part)[1])
+    above = Polygon(np.vstack([np.column_stack([xs, pr.sawtooth(bp, xs, _flags(p, part)[1]) - 0.05]),
+                               [[xs[-1], hi], [xs[0], hi]]]))
+    toothless = max(_geoms(outer.intersection(above)), key=lambda g: g.area)
+    return {'outer': _centre(outer, bp.U), 'toothless': _centre(toothless, bp.U),
+            'holes': [_centre(h, bp.U) for h in holes],
+            'slots': [_centre(s, bp.U) for s in slots], 'teeth': [_centre(t, bp.U) for t in teeth],
+            'valley': (float(valley[0] - bp.U/2), float(valley[1])),
+            'keel': (float(keel[0] - bp.U/2), float(keel[1])), 'fragments': len(pieces)}
+
+
+def seat_x(p: BBParams, below):
+    """X of the seat (the valley of a ``below`` socket) from the socket centre."""
+    bp = p.profile()
+    v = bp.U - bp.valley_u if pr.PART_FLAGS[below][0] else bp.valley_u
+    return v - bp.U/2
+
+
+def x_band(p: BBParams, below='A'):
+    """X offsets of the upper keel from the seat that land on the socket below, a half tooth in from its edges."""
+    v = seat_x(p, below)
+    return -p.U/2 - v + p.tooth_w/2, p.U/2 - v - p.tooth_w/2
+
+
+def y_band(p: BBParams):
+    """Y offsets from the seat that land on the slopes: the nest face below, the main slope and flange above."""
+    return -p.nest_w, p.D/2 + p.flange - p.valley_y
+
+
+def aim(p: BBParams, below='A'):
+    """(x, y) aim offset of the upper brick from its seat (calibrated by capture maps, ``trials.best_aim``)."""
+    return p.aim_x, p.aim_y
+
+
+def _band(p: BBParams, above, below, part=None):
+    """(x, z) region from ``below`` under to ``above`` over the socket's top line."""
+    bp = p.profile()
+    e = bp.end_gap/2
+    xs = pr.breakpoints(bp, e, bp.U - e, _flags(p, part)[0]) - bp.U/2
+    top = top_line(p, xs, part)
+    return Polygon(np.vstack([np.column_stack([xs, top + above]), np.column_stack([xs, top - below])[::-1]]))
+
+
+def flange_profile(p: BBParams, slots, part=None):
+    """The top surface's skin with the slot channels left open (a tooth slides down its channel)."""
+    return _band(p, 0., p.flange_t, part).difference(unary_union(slots))
+
+
+def body_bands(p: BBParams, prof):
+    """(profile, y0, y1) of a socket body: toothless under the nest face and ``tooth_setback`` up the main
+    slope, the full profile (with the tooth) beyond."""
+    start = p.valley_y + p.tooth_setback
+    return [(prof['toothless'], -p.D/2, start), (prof['outer'], start, p.D/2)]
+
+
+def socket_pieces(p: BBParams, dx=0., part=None):
+    prof = socket_profile(p, part)
+    pieces = [q for poly, y0, y1 in body_bands(p, prof) for q in sweep(p, [poly], y0, y1, dx)]
+    if p.flange > 0:
+        pieces += sweep(p, [flange_profile(p, prof['slots'], part)], p.D/2, p.D/2 + p.flange, dx)
+    return pieces
+
+
+ROD_INSET = 1.  # the rod reaches this far into each socket's end face, so they fuse
+
+
+def end_faces(p: BBParams, part=None):
+    """(z low, z high) the socket holds along the Y valley over the rod's inset from each end face.
+
+    The ends run through the sawtooth peaks, but the top and bottom fall away from a peak, so the
+    window is taken over the whole inset (else the rod pokes out of the top into the next course).
+    """
+    e = p.end_gap/2
+    xs = np.array([-p.U/2 + e, -p.U/2 + e + ROD_INSET, p.U/2 - e - ROD_INSET, p.U/2 - e])
+    return float(np.max(bottom_line(p, xs, part))), float(np.min(top_line(p, xs, part)))
+
+
+def rod_band(p: BBParams, part=None):
+    """(z0, z1, floor, ceiling): the rod, centred in the part of the end faces every y of the rod sees."""
+    lo, hi = end_faces(p, part)
+    y0, y1 = p.rod_y - p.rod_w/2, p.rod_y + p.rod_w/2
+    ys = [y0, y1] + ([p.valley_y] if y0 < p.valley_y < y1 else [])
+    floor, ceil = lo + float(np.max(rise(p, ys))), hi + float(np.min(rise(p, ys)))
+    mid = (floor + ceil)/2
+    return mid - p.rod_h/2, mid + p.rod_h/2, floor, ceil
+
+
+def cavity_half(p: BBParams):
+    return p.fork_d/2 + p.cav_play
+
+
+def sleeve_band(p: BBParams, part=None):
+    """(z0, z1) of the sleeves: H0 - sleeve_gap tall, centred on the rod."""
+    z0, z1, _, _ = rod_band(p, part)
+    h = (p.H0 - p.sleeve_gap)/2
+    return (z0 + z1)/2 - h, (z0 + z1)/2 + h
+
+
+def sleeve_x(p: BBParams):
+    return [-p.tine_spacing/2, p.tine_spacing/2]
+
+
+def sleeve_y(p: BBParams):
+    """Y span of the sleeves; the fork enters at the -y end."""
+    return p.cav_y - p.cav_depth/2, p.cav_y + p.cav_depth/2
+
+
+def sleeve_height(p: BBParams):
+    """Height a sleeve needs: floor, the square inside, the V roof and a roof wall."""
+    h = cavity_half(p)
+    return 2*p.cav_wall + 2*h + h*math.tan(math.radians(p.roof_angle))
+
+
+def _sleeve(p: BBParams, part=None):
+    """Heights of a sleeve's floor top, side tops (where the V roof starts) and apex."""
+    z0, z1 = sleeve_band(p, part)
+    h = cavity_half(p)
+    floor = z0 + p.cav_wall
+    side = floor + 2*h
+    return {'h': h, 'z0': z0, 'z1': z1, 'floor': floor, 'side': side,
+            'apex': side + h*math.tan(math.radians(p.roof_angle))}
+
+
+def channels(p: BBParams, part=None):
+    """(x, z) of each tine's centre when the brick hangs on it: wedged into the V roof's apex."""
+    apex = _sleeve(p, part)['apex']
+    return [(float(xs), float(apex - p.fork_d/2/math.cos(math.radians(p.roof_angle)))) for xs in sleeve_x(p)]
+
+
+def rod_and_sleeve_pieces(p: BBParams, part=None):
+    z0, z1, _, _ = rod_band(p, part)
+    ya, yb = p.rod_y - p.rod_w/2, p.rod_y + p.rod_w/2
+    y0, y1 = sleeve_y(p)
+    end = p.pitch/2 - p.U/2 + p.end_gap/2 + ROD_INSET
+    s, cw = _sleeve(p, part), p.cav_wall
+    h, top = s['h'], s['z1']
+    pieces, edges = [], [-end]
+    for xs in sleeve_x(p):
+        pieces.append(_box(xs - h - cw, xs + h + cw, y0, y1, s['z0'], s['floor']))
+        for xa, xb in ((xs - h - cw, xs - h), (xs + h, xs + h + cw)):
+            pieces.append(_box(xa, xb, y0, y1, s['z0'], top))
+        for sign in (-1, 1):
+            sec = [(xs + sign*h, s['side']), (xs, s['apex']), (xs, top), (xs + sign*h, top)]
+            pieces.append(np.array([[x, y, z] for x, z in sec for y in (y0, y1)], float))
+        edges += [xs - h, xs + h]
+    edges.append(end)
+    # The rod runs between the sleeves' insides, so the tines pass through.
+    for xa, xb in zip(edges[::2], edges[1::2]):
+        pieces.append(_box(xa, xb, ya, yb, z0, z1))
+    return pieces
+
+
+def brick_pieces(p: BBParams, part=None):
     pieces = []
-    for x, y in voxels:
-        pieces.append(_box(x - p.U/2, x + p.U/2, y - p.U/2, y + p.U/2, -thickness, 0.))
-        pieces += hopper_pieces(p, (x + p.seat, y + p.seat), 0.)
+    for i in (0, 1):
+        pieces += socket_pieces(p, p.socket_x(i), part)
+    return pieces + rod_and_sleeve_pieces(p, part)
+
+
+def base_pieces(p: BBParams, sites, part='A', thickness=None):
+    """Anchored base receiving a course-0 ``part`` at each site x (world mm): base top and flange."""
+    bp = p.profile()
+    thickness = thickness or bp.tooth_L + bp.slot_extra + 4
+    _, m, _, rev = pr.PART_FLAGS[part]
+    outer, valleys = pr.base_outer(bp, 1, thickness, 1, part)
+    slots = [_centre(pr.slot(bp, v, mirrored=m, reversed=rev), bp.U) for v in valleys]
+    outer = _centre(outer, bp.U)
+    xs = pr.breakpoints(bp, 0., bp.U, m)
+    top = pr.sawtooth(bp, xs, m)
+    xs = xs - bp.U/2
+    flange = Polygon(np.vstack([np.column_stack([xs, top]), np.column_stack([xs, top - p.flange_t])[::-1]]))
+    pieces = []
+    for x in sites:
+        pieces += sweep(p, [outer], -p.D/2, p.D/2, x)
+        if p.flange > 0:
+            pieces += sweep(p, [flange.difference(unary_union(slots))], p.D/2, p.D/2 + p.flange, x)
     return pieces
