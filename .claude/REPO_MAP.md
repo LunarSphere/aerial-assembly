@@ -48,8 +48,8 @@ Search and output
 - `geometry.py` convex pieces: one brixzle voxel per socket (`socket_profile`, toothless under the nest), swept through the Y sawtooth (`rise`, `sweep`), flange, rod and V-roof sleeves, base; aim and catchment bands
 - `cad.py` CadQuery solid (sockets extruded with lightening holes, the rest hull-and-fuse), mass, STL/STEP; `render.py` views, stack, sections, capture-map PNGs
 - `rules.py` slide (incl. the V-groove factor on the Y slope), catchment around the aim, brixzle joint rules, one-course fit, fork, payload; `size_for_tolerance`
-- `lattice.py` sites along x, A/B by course, support, assembly order; `structures.py` tower, wall, bridge, overhang (no ring)
-- `trials.py` drops, capture sweeps and 2D capture maps (`best_aim`), assembly (dropped or `place`d), push, on brixzle's scene and settle loop
+- `lattice.py` sites along x, A/B by course, support, assembly order; `structures.py` tower, wall, bridge, overhang, corbel (the overhang that stands; no ring)
+- `trials.py` drops, capture sweeps and 2D capture maps (`best_aim`), assembly (dropped, placed, or overhang bricks placed), push, on brixzle's scene and settle loop
 - `animate.py` geometry-only stacking video (MuJoCo renderer)
 - `configs/` bb-mean, bb-p95; `tests/` pytest (about 20 s)
 

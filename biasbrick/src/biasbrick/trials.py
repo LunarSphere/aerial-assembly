@@ -196,7 +196,8 @@ def assemble(p: BBParams, bricks, structure, cfg: TrialConfig, seed=0, stop_on_f
 
     ``place`` instead sets each brick at its seat, at rest (an ideal carried placement, as a drone that
     lowers the brick on its fork rather than dropping it): it measures what the structure holds, apart
-    from what a drop can seat.
+    from what a drop can seat. ``place='overhang'`` places only bricks with one supported socket (a
+    dropped one falls before its tooth engages) and drops the rest.
 
     Collapse (as brixzle and dfbrick): a placed brick moves more than ``tolerance.drift`` while the new
     one settles, any brick touches the floor, or a brick sags more than H0/2 from its lattice seat.
@@ -221,7 +222,7 @@ def assemble(p: BBParams, bricks, structure, cfg: TrialConfig, seed=0, stop_on_f
         sup = L.supporter(structure, b)
         ref = (index[sup.name], L.pose(p, sup)) if sup is not None else None
         seat = L.pose(p, b)
-        if place:
+        if place is True or (place == 'overhang' and len(L.supported_sockets(structure, b)) < 2 and b.course):
             sample = {'placed': True}
             activate(model, data, info, j, *seat)
         else:

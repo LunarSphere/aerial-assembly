@@ -71,11 +71,15 @@ uv run biasbrick rules  --params configs/bb-mean.json --approach-error ../brixzl
 uv run biasbrick animate --params configs/bb-mean.json --out ../runs/bb-anim                  # geometry only, not physics
 uv run biasbrick drop   --params configs/bb-mean.json --on-brick --approach-error ../brixzle/configs/error-exp3-r4.json --out ../runs/bb-drop
 uv run biasbrick drop   --params configs/bb-mean.json --samples 0 --map --ideal --on-brick --map-radius 14.82 --out ../runs/bb-map
-uv run biasbrick assemble wall --seed 1 --approach-error ../brixzle/configs/error-exp3-r4.json --out ../runs/bb-wall   # --place: carried
+uv run biasbrick assemble wall --seed 1 --approach-error ../brixzle/configs/error-exp3-r4.json --out ../runs/bb-wall
+uv run biasbrick assemble corbel --place-overhang --seed 1 --approach-error ../brixzle/configs/error-exp3-r4.json --out ../runs/bb-corbel
 uv run biasbrick push   --out ../runs/bb-push
 ```
 
-`--set key=value` overrides a parameter. Every output directory must be new.
+Structures: `tower`, `wall`, `bridge`, `overhang+`, `overhang-`, `corbel` (the overhang that stands: 4 courses, 3 wide),
+`corbel2` and `corbel3` (6 courses, to find the limit). `--place` sets every brick at its seat at rest (an ideal carried
+placement, as a drone lowering it on the fork); `--place-overhang` places only the bricks with one supported socket and
+drops the rest. `--set key=value` overrides a parameter. Every output directory must be new.
 
 ## Results
 
@@ -101,17 +105,23 @@ release 5–30 mm and velocity σ 0.03 m/s.
 | Tower (6) | 6 | 6, 6, 6, 6 | 6, 6, 1, 2, 6, 6, 6, 6 (6 of 8 complete) | 4, 4, 1, 6 |
 | Wall, 4-3-2-1 (10) | 10 | 10, 10, 10, 10 | 10, 10, 1, 10, 10, 10, 10, 10 (7 of 8) | 4, 10, 1, 10 |
 | Bridge, key last (5) | 5 | 5, 5, 5, 4 | 5, 5, 1, 5, 5, 5, 5, 5 (7 of 8) | 4, 4, 1, 5 |
-| Overhang ± (12) | 1 | 1 | 1 | 1 |
+| Overhang ±, a 1-wide stair (12) | 1 | 1 | 1 | 1 |
+| **Corbel**, 3 wide, 4 courses (12), overhang bricks placed | 12 | 12, 12, 12, 12 | 12, 12, 1, 12, 12, 12, 12, 12 (7 of 8) | |
 
 - **Seed 3** draws a 16.6° yaw (3.3σ of the unmeasured model) on its second placement and fails every
   structure, as it does for DF.
 - **Push** (ideal 6-tower, ramped force on the top brick until it moves 2 mm): 1.26 N in +x, 1.37 N in -x,
   1.12 N in -y and 0.58 N in +y (up the slope). DF-mean took 0.79 N and A/B V0 0.40 N.
-- **Overhangs.** A dropped overhang brick falls before its tooth engages: its hanging socket drops first and
-  twists it. Set at its seat at rest instead (`--place`, an ideal carried placement), one overhang step holds in
-  both directions. At the third brick the +x stair moves 2.5 mm, past the 2 mm collapse threshold, and the -x
-  stair falls. That one step already reaches 121 mm, further than brixzle's 5-brick stair (4 steps of 25 mm,
-  per its README), but a second step puts about 4 times the first step's moment on the lower joint.
+- **Overhangs: the corbel stands, the stair does not.**
+  - **Stair.** A dropped overhang brick falls before its tooth engages: its hanging socket drops first and twists it.
+    Set at its seat at rest instead (`--place`), one step holds; at the third brick the stair moves or falls.
+  - **Corbel.** Each course is 3 bricks in running bond, stepped one site out. The next course's brick across each joint
+    pins the outer brick's tail, so the overhang is a hooked cantilever tied back to the base, not a chain of single
+    hooks. Four courses reach **3 sites (363 mm) past the base**, against 100 mm for brixzle's 5-brick stair (its
+    README). Only the 4 overhang bricks are placed; the other 8 are dropped at the aim. The tip settles about 4 mm low.
+  - **Limit.** At the fifth course the tip sags past H0/2 (7.5 mm), in 2- and 3-wide corbels alike. The seated play of
+    each joint (atan(2 × 0.3 / 6.5), about 5°) adds up; 0.15–0.2 mm clearance cut the sag but did not add a course
+    (runs `bb9-placed-c*`). The effect of tighter clearance on drops was not tested.
 
 ## Limits and open problems
 
@@ -123,6 +133,7 @@ release 5–30 mm and velocity σ 0.03 m/s.
   is not ported yet).
 - **No corners or ring:** a brick along Y would turn its sawtooth and nest by 90°, and no socket receives a
   crossing brick.
-- **Overhangs** need carried placement and a way to pin the tail (or a finer step); see above.
+- **Overhangs** need the drone to lower each overhanging brick (simulated here as an ideal placement at its seat, with no
+  error): a carried placement with the measured error is untested until `fly-assemble` is ported.
 - A tooth lengthened to 8 mm jammed every drop; the cause was not found.
 - The capture maps behind the aim ignore yaw; the aim was then checked by drops.

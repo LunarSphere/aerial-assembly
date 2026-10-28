@@ -43,6 +43,19 @@ def overhang(count=12, direction=+1):
     return Structure(f'overhang{"+" if direction > 0 else "-"}', [Placement(k, direction*k) for k in range(count)])
 
 
+def corbel(courses=6, width=2):
+    """Corbelled overhang: every course is ``width`` bricks in running bond, shifted one site toward +x.
+
+    Each course's outer brick reaches one site past the course below (one supported socket); the next
+    course's brick across that joint pins its tail, so the overhang is a hooked cantilever tied back to the
+    base rather than a chain of single hooks. Reach after k courses: k - 1 sites past the base.
+    ``corbel`` (4 courses, 3 wide) is the overhang that stands: 3 sites, 363 mm, past the base; at the
+    5th course the tip sags past H0/2 (runs/biasbrick/current/bb9-*).
+    """
+    return Structure(f'corbel{width}', [Placement(k, k + 2*m) for k in range(courses) for m in range(width)])
+
+
 def catalog():
     return {'tower': lambda: tower(6), 'wall': lambda: wall(4, 4), 'bridge': lambda: bridge(2),
-            'overhang+': lambda: overhang(12, +1), 'overhang-': lambda: overhang(12, -1)}
+            'overhang+': lambda: overhang(12, +1), 'overhang-': lambda: overhang(12, -1),
+            'corbel': lambda: corbel(4, 3), 'corbel2': lambda: corbel(6, 2), 'corbel3': lambda: corbel(6, 3)}

@@ -51,3 +51,25 @@ def test_a_placed_overhang_brick_hangs_on_its_hook(bricks):
     """Set at its seat (a carried placement), one overhanging brick stays: its tooth holds it."""
     result, _ = T.assemble(DEFAULT, bricks, S.overhang(2, +1), IDEAL, place=True)
     assert result['status'] == 'complete'
+
+
+def test_corbel_pins_every_overhanging_tail():
+    """Each course's outer brick has one supported socket; the next course's brick across that joint
+    sits on its tail, so no overhanging brick is left hanging on its hook alone."""
+    st = S.corbel(4, 3)
+    L.validate(st)
+    own = L.owners(st)
+    for b in st.bricks:
+        if b.course and len(L.supported_sockets(st, b)) == 1 and b.course < 3:
+            tail = b.sites[0]
+            assert (b.course + 1, tail) in own  # pinned from above
+    base_edge = max(s for b in st.bricks if b.course == 0 for s in b.sites)
+    assert max(s for b in st.bricks for s in b.sites) - base_edge == 3  # 3 sites past the base
+
+
+def test_mixed_placement_builds_a_corbel(bricks):
+    """Simulated, uncalibrated contact: overhanging bricks placed (carried), the rest dropped at the aim."""
+    result, _ = T.assemble(DEFAULT, bricks, S.corbel(3, 3), IDEAL, place='overhang')
+    assert result['status'] == 'complete' and result['max_sag_mm'] < DEFAULT.H0/2
+    placed = [s for s in result['stages'] if s['sample'] == {'placed': True}]
+    assert len(placed) == 2  # one outer brick per course above the base

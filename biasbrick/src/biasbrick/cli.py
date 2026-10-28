@@ -176,15 +176,19 @@ def cmd_assemble(args):
     frames = [] if args.video else None
     cfg = _trial_config(args)
     result, (model, data, info, xml) = T.assemble(p, bricks, structure, cfg, seed=args.seed,
-                                                  stop_on_fail=not args.keep_going, record=frames, place=args.place)
-    result.update(config=as_dict(cfg), params=p.to_dict(), seed=args.seed, placement='placed' if args.place else 'dropped',
+                                                  stop_on_fail=not args.keep_going, record=frames,
+                                                  place='overhang' if args.place_overhang else args.place)
+    result.update(config=as_dict(cfg), params=p.to_dict(), seed=args.seed,
+                  placement='placed' if args.place else 'overhang bricks placed' if args.place_overhang else 'dropped',
                   mass_g={k: b['mass_g'] for k, b in bricks.items()})
     write_json(out/'summary.json', result)
     (out/'scene.xml').write_text(xml)
     if args.video:
         from brixzle.render import render
-        render(model, frames, out/'assembly.mp4', azimuth=-120, elevation=-20)
-        render(model, frames, out/'final.png', azimuth=-120, elevation=-20)
+        view = dict(azimuth=args.azimuth, elevation=args.elevation, distance=args.distance,
+                    lookat=[v*1e-3 for v in args.lookat] if args.lookat else None)
+        render(model, frames, out/'assembly.mp4', **view)
+        render(model, frames, out/'final.png', **view)
     print(f'{result["structure"]}: {result["status"]}, {result["stable_bricks"]}/{result["total"]} stable, '
           f'max sag {result["max_sag_mm"]:.2f} mm')
 
@@ -272,7 +276,13 @@ def main(argv=None):
     sp.add_argument('--seed', type=int, default=0)
     sp.add_argument('--keep-going', action='store_true', help='do not stop at the first failed placement')
     sp.add_argument('--place', action='store_true', help='set each brick at its seat at rest (ideal carried placement)')
+    sp.add_argument('--place-overhang', action='store_true',
+                    help='place only bricks with one supported socket (carried); drop the rest')
     sp.add_argument('--video', action='store_true')
+    sp.add_argument('--azimuth', type=float, default=-120.)
+    sp.add_argument('--elevation', type=float, default=-20.)
+    sp.add_argument('--distance', type=float, help='camera distance (m); default fits the scene')
+    sp.add_argument('--lookat', type=float, nargs=3, metavar=('X', 'Y', 'Z'), help='camera target (mm)')
     trial_args(sp)
     sp.set_defaults(func=cmd_assemble)
 
