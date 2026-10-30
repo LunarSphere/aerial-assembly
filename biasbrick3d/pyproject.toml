@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "biasbrick3d"
+version = "0.1.0"
+description = "biasbrick 3D (v1 of #45): corner-seeking hoppers on a DF rail, leaning tooth and slot, shelled fork cavities"
+requires-python = "==3.12.*"
+dependencies = [
+    "brixzle",
+    "dfbrick",
+    "flight",
+    "cadquery>=2.5",
+    "mujoco==3.16.0",
+    "numpy>=2,<3",
+    "scipy>=1.14,<2",
+    "trimesh>=4.12.2,<5",
+    "networkx>=3.3",
+    "matplotlib>=3.8",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10"]
+video = ["pillow>=12,<13", "imageio>=2.37,<3", "imageio-ffmpeg>=0.6,<1"]
+
+[project.scripts]
+biasbrick3d = "biasbrick3d.cli:main"
+
+[tool.uv.sources]
+brixzle = { path = "../brixzle", editable = true }
+dfbrick = { path = "../dfbrick", editable = true }
+flight = { path = "../flight", editable = true }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
