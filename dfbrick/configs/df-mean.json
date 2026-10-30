@@ -1,0 +1,8 @@
+{
+  "U": 44.5,
+  "n_vox": 3,
+  "wall_t": 1.2,
+  "end_gap": 2.0,
+  "foot_kind": "cup",
+  "receiver_mode": "pocket"
+}

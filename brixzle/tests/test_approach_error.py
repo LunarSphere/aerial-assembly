@@ -56,7 +56,7 @@ def test_rejects_wrong_kind_and_non_finite(tmp_path):
         AE.error_model(AE.load(_metrics(tmp_path)), 'median')
 
 
-@pytest.mark.parametrize('stat,radius', [('mean', 15.2), ('max', 30.)])
+@pytest.mark.parametrize('stat,radius', [('mean', 15.2), ('max', 30.), ('p95', 28.)])
 def test_ring_models_sample_fixed_radius_any_direction(tmp_path, stat, radius):
     err = AE.error_model(AE.load(_metrics(tmp_path)), stat)
     assert err.radial_mode == 'ring' and err.aim_bias == 0.
@@ -98,7 +98,7 @@ def test_gauss_mode_unchanged():
         assert {k: s[k] for k in expect} == expect
 
 
-@pytest.mark.parametrize('stat,tol', [('mean', 15.2), ('max', 30.), ('empirical', None)])
+@pytest.mark.parametrize('stat,tol', [('mean', 15.2), ('max', 30.), ('p95', 28.), ('empirical', None)])
 def test_required_tolerance(tmp_path, stat, tol):
     s = AE.load(_metrics(tmp_path))
     expect = tol if tol is not None else float(np.percentile(s['radii_mm'], 95))

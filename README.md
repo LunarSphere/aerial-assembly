@@ -21,6 +21,18 @@ passive gripper that a Crazyflie can pick up and release without actuators.
   tag-visit checks. Decisions and results so far are in
   [`brixzle/docs/exp2/STATUS.md`](brixzle/docs/exp2/STATUS.md).
 
+- **Distributed-funnel bricks (DF-brick)** ([`dfbrick/`](dfbrick/README.md)). A
+  new brick family sized from the Experiment 3 measured approach error: two
+  nesting-cup feet on a rigid rail seat in parallel-throat square funnels with a
+  wide baseline. It runs the same drop, assembly, ring and `fly-assemble` trials
+  as brixzle, which it reuses.
+
+- **biasbricks** ([`biasbrick/`](biasbrick/README.md)). brixzle's A/B brick cut
+  into two sockets joined by a rod, with the drone aiming off the seat up a
+  one-sided Y slope that ends in a nest. Sized from the same measured error; it
+  runs the drop, capture-map, assembly and push trials. Its earlier 3D version
+  is kept in [`biasbrick3d/`](biasbrick3d/README.md).
+
 Results from simulation use uncalibrated contact and aerodynamics. They are not
 hardware success rates.
 
@@ -29,10 +41,13 @@ hardware success rates.
 | Path | What |
 |---|---|
 | [`brixzle/`](brixzle/README.md) | Brick geometry, MuJoCo trials, NSGA-III search, simulated drone and `fly-assemble` planner |
+| [`dfbrick/`](dfbrick/README.md) | Distributed-funnel brick family: geometry, rules, MuJoCo trials and simulated drone assembly, built on brixzle |
+| [`biasbrick/`](biasbrick/README.md) | biasbrick family (#45): half-brixzle sockets on a rod, aim bias, Y nest; geometry, rules, MuJoCo trials, built on brixzle and dfbrick |
+| [`biasbrick3d/`](biasbrick3d/README.md) | The 3D corner-hopper version of biasbrick, kept for comparison (geometry and rules only) |
 | [`flight/`](flight/README.md) | cflib flight program (`fly`) and Experiment 2 calibration (`flight-cal`) |
 | [`stl_exports/`](stl_exports/) | CAD meshes, including the A/B bricks and the printable fork gripper |
 | [`.claude/`](.claude/REPO_MAP.md) | Module map and Claude Code project skills |
-| `.github/` | CI (pytest for `flight` and `brixzle`) and Dependabot |
+| `.github/` | CI (pytest for `flight`, `brixzle`, `dfbrick`, `biasbrick` and `biasbrick3d`) and Dependabot |
 
 Run outputs (`runs/`), generated assets, model weights and videos are
 git-ignored and stay local.
@@ -41,6 +56,9 @@ git-ignored and stay local.
 
 ```bash
 cd brixzle && uv sync --all-extras && uv run pytest
+cd ../dfbrick && uv sync --all-extras && uv run pytest
+cd ../biasbrick && uv sync --all-extras && uv run pytest
+cd ../biasbrick3d && uv sync --all-extras && uv run pytest
 cd .. && uv run --project flight --extra test pytest flight/tests -q
 ```
 

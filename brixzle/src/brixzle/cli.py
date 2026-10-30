@@ -227,8 +227,8 @@ def parser():
         sp.add_argument('--seed', type=int, default=0)
         sp.add_argument('--sigma', type=float, help='placement sigma (mm) in X and Y')
         sp.add_argument('--approach-error', help='measured X-Y error: Exp 3 metrics.json or configs/error-*.json')
-        sp.add_argument('--error-stat', choices=['mean', 'max', 'empirical'], default='mean',
-                        help='with --approach-error: fixed mean or max radius, or resampled radii')
+        sp.add_argument('--error-stat', choices=['mean', 'max', 'p95', 'empirical'], default='mean',
+                        help='with --approach-error: fixed mean, max or p95 radius, or resampled radii')
 
     sp = sub.add_parser('export', help='CAD solid, STL/STEP, profile plot, rule margins')
     sp.add_argument('--params')
