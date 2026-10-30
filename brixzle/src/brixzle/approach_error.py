@@ -20,7 +20,7 @@ from .config import read_json
 from .trials import ErrorModel
 
 CONFIG_DIR = Path(__file__).resolve().parents[2]/'configs'
-STATISTICS = ('mean', 'max', 'empirical')
+STATISTICS = ('mean', 'max', 'p95', 'empirical')
 UNMEASURED = ('sigma_yaw', 'sigma_tilt', 'clearance', 'sigma_vel')
 PERCENTILE = 95  # required tolerance for the empirical model
 
