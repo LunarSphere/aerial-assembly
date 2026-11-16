@@ -661,7 +661,7 @@ requires-dist = [
     { name = "pyrealsense2", marker = "extra == 'realsense'", specifier = ">=2.56,<3" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=9.2.0,<10" },
     { name = "scipy", specifier = ">=1.14,<2" },
-    { name = "ultralytics", marker = "python_full_version >= '3.11' and extra == 'yolo'", specifier = "==8.4.203" },
+    { name = "ultralytics", marker = "python_full_version >= '3.11' and extra == 'yolo'", specifier = "==8.4.212" },
 ]
 provides-extras = ["vision", "realsense", "detector", "yolo", "plot", "test"]
 
@@ -2811,7 +2811,7 @@ wheels = [
 
 [[package]]
 name = "ultralytics"
-version = "8.4.203"
+version = "8.4.212"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "matplotlib", version = "3.11.2", source = { registry = "https://pypi.org/simple" } },
@@ -2828,9 +2828,9 @@ dependencies = [
     { name = "ultralytics-platform" },
     { name = "ultralytics-thop" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/45/fa/36524e2f9241ecebd77c1bbe86b049ffa7f222702fc2ccc78f63683db4f5/ultralytics-8.4.203.tar.gz", hash = "sha256:bbae950e5815ce37eb301aac798a4431b871dd6aa5915e54824b78e7d63b52b1", size = 1299851, upload-time = "2026-11-05T19:13:30.408Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/bd/1a/79e8799b07f253dc713ecccef37cce4672b0cb193b1606deda04409e791a/ultralytics-8.4.212.tar.gz", hash = "sha256:51bfa8c0e65b96c2d7dbad3da01b8988feb1f6632f910ecbc6092fcd4e63525f", size = 1323859, upload-time = "2026-11-13T13:09:19.367Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9c/52/1758911812d530327ea245d23c5291587a39d8dc69a4514f086ce3377106/ultralytics-8.4.203-py3-none-any.whl", hash = "sha256:34151047663426936b2699fd1ae8c325c7ee2ebaa282fcd70ced4a4577183191", size = 1440020, upload-time = "2026-11-05T19:13:26.301Z" },
+    { url = "https://files.pythonhosted.org/packages/16/f0/3250658cec8997a76326d41780dfd75e0d53280c7eb373a8aad6d4031008/ultralytics-8.4.212-py3-none-any.whl", hash = "sha256:bde0e699973fd03c7021bf7e4a1553e459e4932e322d8a24aee9eb90478b9136", size = 1463824, upload-time = "2026-11-13T13:09:14.695Z" },
 ]
 
 [[package]]
