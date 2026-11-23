@@ -10,7 +10,7 @@ requires-python = "==3.12.*"
 dependencies = [
     "flight",
     "cadquery>=2.5",
-    "mujoco==3.16.0",
+    "mujoco==3.17.0",
     "numpy>=2,<3",
     "scipy>=1.14,<2",
     "trimesh>=4.12.2,<5",
